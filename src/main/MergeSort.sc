@@ -17,6 +17,7 @@ def MergeSort(l: List[Int]): List[Int] = {
   }
 }
 
+//Same thing, but merge is tail recursive
 def MergeSort2(l: List[Int]): List[Int] = {
   def merge(xs: List[Int], ys: List[Int], acc: List[Int]): List[Int] =
     (xs, ys) match {
