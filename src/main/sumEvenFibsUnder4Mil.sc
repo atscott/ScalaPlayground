@@ -1,3 +1,6 @@
+/*
+*https://projecteuler.net/problem=2
+*/
 def isEven(x: BigInt): Boolean = x % 2 == BigInt(0)
 
 def fib(): Stream[BigInt] = {
