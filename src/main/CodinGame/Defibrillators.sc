@@ -1,19 +1,3 @@
-val defibStrings = List("1;Maison de la Prevention Sante;6 rue Maguelone 340000 Montpellier;;3,87952263361082;43,6071285339217",
-  "2;Hotel de Ville;1 place Georges Freche 34267 Montpellier;;3,89652239197876;43,5987299452849",
-  "3;Zoo de Lunaret;50 avenue Agropolis 34090 Mtp;;3,87388031141133;43,6395872778854")
-
-val defibrillators = for (d <- defibStrings) yield {
-  (d split ";").toList
-}
-
-val defibrillators2 = for (d <- completeFile) yield {
-  (d split ";").toList
-}
-
-findClosestDefibrillator(defibrillators, 43, 3.833542)
-findClosestDefibrillator(defibrillators2, 43.634646, 3.833542)
-
-
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 def findClosestDefibrillator(defibrillators: List[List[String]], myLat: Double, myLong: Double): List[String] = {
   defibrillators.minBy(m => distance(getLatitude(m), getLongitude(m), myLat, myLong))
@@ -31,6 +15,16 @@ def getCoordinate(i: Int)(d: List[String]): Double =
   d.drop(i).head.replace(',', '.').toDouble
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+val defibStrings = List("1;Maison de la Prevention Sante;6 rue Maguelone 340000 Montpellier;;3,87952263361082;43,6071285339217",
+  "2;Hotel de Ville;1 place Georges Freche 34267 Montpellier;;3,89652239197876;43,5987299452849",
+  "3;Zoo de Lunaret;50 avenue Agropolis 34090 Mtp;;3,87388031141133;43,6395872778854")
+
+val defibrillators = for (d <- defibStrings) yield {
+  (d split ";").toList
+}
+
+
+findClosestDefibrillator(defibrillators, 43, 3.833542)
 val completeFile = List("1;Maison de la Prevention Sante;6 rue Maguelone 340000 Montpellier;04 67 02 21 60;3,87952263361082;43,6071285339217",
   "2;Hotel de Ville;1 place Georges Freche 34267 Montpellier;04 67 34 44 93;3,89652239197876;43,5987299452849",
   "3;Zoo de Lunaret;50 avenue Agropolis 34090 Mtp;04 67 54 45 23;3,87388031141133;43,6395872778854",
@@ -198,3 +192,10 @@ val completeFile = List("1;Maison de la Prevention Sante;6 rue Maguelone 340000 
   "187;Cirad;Avenue agropolis 34398 MONTPELLIER;;3,868430789818;43,6504884118088",
   "188;Mornay;26 allee jules milhau 34965 MONTPELLIER;;3,88335468006384;43,6090204423773",
   "189;Boulodrome Bernard Gasset;122 avenue Maurice Planes 34070 MONTPELLIER;;3,84329169898554;43,5967806501323")
+
+
+val defibrillators2 = for (d <- completeFile) yield {
+  (d split ";").toList
+}
+
+findClosestDefibrillator(defibrillators2, 43.634646, 3.833542)
