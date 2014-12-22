@@ -16,23 +16,41 @@ class Move(val origin: Int, val destination: Int) {
 
 class Board(val zones: HashMap[Int, Zone], val adjacencyList: Map[Int, Set[Int]]) {
   def neighborsWithHistory(z: Zone, history: List[Move]): Stream[(Zone, List[Move])] = {
-    val adjacentZones = adjacencyList.get(z.id)
+    val adjacentZones = adjacencyList.get(z.id).get
     if (adjacentZones.isEmpty) Stream()
-    else
-      adjacentZones
-        .head
-        .map(zoneId => (zones.get(zoneId).head, new Move(z.id, zoneId) :: history))
-        .toStream
+    else {
+      try {
+        adjacentZones
+          .map(zoneId => (zones.get(zoneId).head, new Move(z.id, zoneId) :: history))
+          .toStream
+      } catch {
+        case _: Throwable => {
+          println(adjacencyList)
+          adjacentZones
+            .map(zoneId => (zones.get(zoneId).head, new Move(z.id, zoneId) :: history))
+            .toStream
+        }
+      }
+    }
   }
 
   def getPlayerPodSizeForZone(zoneId: Int, playerId: Int): Int = {
     val pod = zones.get(zoneId).get.occupants.filter(p => p.owner == playerId)
-    pod.headOption match {
-      case Some(x) => x.size
-      case _ => 0
-    }
+    pod.headOption.map(_.size).getOrElse(0)
   }
 
+  private
+  def zoneAdjacentOwnersCheck(p: Int => Boolean)(zoneId: Int, playerId: Int): Boolean = {
+    adjacencyList.get(zoneId).get
+      .map(zoneId => zones.get(zoneId).get.owner)
+      .exists(p)
+  }
+
+  def zoneHasAdjacentNotOwnedByPlayer(zoneId: Int, playerId: Int): Boolean =
+    zoneAdjacentOwnersCheck(ownerId => ownerId != playerId)(zoneId, playerId)
+
+  def zoneHasAdjacentOwnedByDifferentPlayer(zoneId: Int, playerId: Int): Boolean =
+    zoneAdjacentOwnersCheck(ownerId => ownerId != playerId && ownerId != -1)(zoneId, playerId)
 
   def newNeighborsOnly(neighbors: Stream[(Zone, List[Move])], explored: Set[Zone]): Stream[(Zone, List[Move])] =
     neighbors.filter { case (block, ml) => !explored.contains(block)}
@@ -56,6 +74,7 @@ val board = new Board(zm, adjacencies)
 printBuys(board, 0, 1)
 
 printMoves(board, 0)
+board.getPlayerPodSizeForZone(1, 0)
 
 def printMoves(b: Board, player: Int) = {
   val zonesWithPlayerPods = b.zones.filter(f => f._2.occupants.exists(pod => pod.owner == player))
@@ -69,8 +88,8 @@ def printMoves(b: Board, player: Int) = {
 
 def getTargetMoveZone(board: Board, startZone: Zone, player: Int): Stream[(Zone, List[Move])] = {
   val moves = board.from(Stream((startZone, List())), Set())
-  val movesWithin15 = moves.filter(f => f._2.size < 15)
-  val sorted = movesWithin15.sortWith((p1, p2) => p1._2.size - p1._1.platinumSource < p2._2.size - p2._1.platinumSource)
+  val movesWithinX = moves.takeWhile(f => f._2.size < 15)
+  val sorted = movesWithinX.sortWith((p1, p2) => p1._2.size - p1._1.platinumSource < p2._2.size - p2._1.platinumSource)
   sorted.filter(f => f._1.owner != player)
 }
 
@@ -84,6 +103,11 @@ def printBuys(board: Board, player: Int, availablePlatinum: Int) = {
 def getBuyTargets(board: Board, player: Int, availablePlatinum: Int): List[BuyCommand] = {
   val zonesWithPlayerPods = board.zones.filter(f => f._2.occupants.exists(pod => pod.owner == player)).toList
   val sorted = zonesWithPlayerPods.sortWith((s1, s2) => board.getPlayerPodSizeForZone(s1._2.id, player) < board.getPlayerPodSizeForZone(s2._2.id, player))
-  List(new BuyCommand(sorted.head._2, availablePlatinum))
+  val edge = sorted.dropWhile(p => !board.zoneHasAdjacentNotOwnedByPlayer(p._2.id, player))
+  val enemyEdge = sorted.dropWhile(p => !board.zoneHasAdjacentOwnedByDifferentPlayer(p._2.id, player))
+
+  if (enemyEdge.nonEmpty) List(new BuyCommand(enemyEdge.head._2, availablePlatinum/20))
+  else if (edge.nonEmpty) List(new BuyCommand(edge.head._2, availablePlatinum/20))
+  else List(new BuyCommand(sorted.head._2, availablePlatinum/20))
 }
 
