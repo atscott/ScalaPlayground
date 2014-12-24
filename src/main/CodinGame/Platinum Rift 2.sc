@@ -18,20 +18,10 @@ class Board(val zones: HashMap[Int, Zone], val adjacencyList: Map[Int, Set[Int]]
   def neighborsWithHistory(z: Zone, history: List[Move]): Stream[(Zone, List[Move])] = {
     val adjacentZones = adjacencyList.get(z.id).get
     if (adjacentZones.isEmpty) Stream()
-    else {
-      try {
-        adjacentZones
-          .map(zoneId => (zones.get(zoneId).head, new Move(z.id, zoneId) :: history))
-          .toStream
-      } catch {
-        case _: Throwable => {
-          println(adjacencyList)
-          adjacentZones
-            .map(zoneId => (zones.get(zoneId).head, new Move(z.id, zoneId) :: history))
-            .toStream
-        }
-      }
-    }
+    else
+      adjacentZones
+        .map(zoneId => (zones.get(zoneId).head, new Move(z.id, zoneId) :: history))
+        .toStream
   }
 
   def getPlayerPodSizeForZone(zoneId: Int, playerId: Int): Int = {
@@ -72,24 +62,24 @@ val zm = HashMap(zones.map(m => (m.id, m)): _*)
 val adjacencies = HashMap((1, Set(2)), (2, Set(1)), (2, Set(3)), (3, Set(2)))
 val board = new Board(zm, adjacencies)
 printBuys(board, 0, 1)
-
 printMoves(board, 0)
 board.getPlayerPodSizeForZone(1, 0)
-
 def printMoves(b: Board, player: Int) = {
-  val zonesWithPlayerPods = b.zones.filter(f => f._2.occupants.exists(pod => pod.owner == player))
+  val zonesWithPlayerPods = b.zones.filter { case (zoneId, zone) => zone.occupants.exists(pod => pod.owner == player)}
   val moves = zonesWithPlayerPods
-    .map(f => getTargetMoveZone(b, f._2, player))
+    .map { case (zoneId, zone) => getTargetMoveZone(b, zone, player)}
     .filter(_.size > 0)
     .map(m => m.head)
-  val moveString = moves.foldLeft("")((r, c) => r + 1 + " " + c._2.last.origin + " " + c._2.last.destination + " ")
+  val moveString = moves.foldLeft("") { case (r, (zone, moveList)) => r + 1 + " " + moveList.last.origin + " " + moveList.last.destination + " "}
   println(moveString)
 }
 
 def getTargetMoveZone(board: Board, startZone: Zone, player: Int): Stream[(Zone, List[Move])] = {
   val moves = board.from(Stream((startZone, List())), Set())
-  val movesWithinX = moves.takeWhile(f => f._2.size < 15)
-  val sorted = movesWithinX.sortWith((p1, p2) => p1._2.size - p1._1.platinumSource < p2._2.size - p2._1.platinumSource)
+  val movesWithinX = moves.takeWhile { case (zoneId, zone) => zone.size < 15}
+  val sorted = movesWithinX.sortWith { case ((zoneA, moveListA), (zoneB, moveListB)) =>
+    moveListA.size - zoneA.platinumSource < moveListB.size - zoneB.platinumSource
+  }
   sorted.filter(f => f._1.owner != player)
 }
 
@@ -101,13 +91,15 @@ def printBuys(board: Board, player: Int, availablePlatinum: Int) = {
 }
 
 def getBuyTargets(board: Board, player: Int, availablePlatinum: Int): List[BuyCommand] = {
-  val zonesWithPlayerPods = board.zones.filter(f => f._2.occupants.exists(pod => pod.owner == player)).toList
-  val sorted = zonesWithPlayerPods.sortWith((s1, s2) => board.getPlayerPodSizeForZone(s1._2.id, player) < board.getPlayerPodSizeForZone(s2._2.id, player))
-  val edge = sorted.dropWhile(p => !board.zoneHasAdjacentNotOwnedByPlayer(p._2.id, player))
-  val enemyEdge = sorted.dropWhile(p => !board.zoneHasAdjacentOwnedByDifferentPlayer(p._2.id, player))
+  val zonesWithPlayerPods = board.zones.filter { case (zoneId, zone) => zone.occupants.exists(pod => pod.owner == player)}.toList
+  val sorted = zonesWithPlayerPods.sortWith { case ((zone1Id, zone1), (zone2Id, zone2)) =>
+    board.getPlayerPodSizeForZone(zone1Id, player) < board.getPlayerPodSizeForZone(zone2Id, player)
+  }
+  val edge = sorted.dropWhile { case (zoneId, zone) => !board.zoneHasAdjacentNotOwnedByPlayer(zoneId, player)}
+  val enemyEdge = sorted.dropWhile { case (zoneId, zone) => !board.zoneHasAdjacentOwnedByDifferentPlayer(zoneId, player)}
 
-  if (enemyEdge.nonEmpty) List(new BuyCommand(enemyEdge.head._2, availablePlatinum/20))
-  else if (edge.nonEmpty) List(new BuyCommand(edge.head._2, availablePlatinum/20))
-  else List(new BuyCommand(sorted.head._2, availablePlatinum/20))
+  if (enemyEdge.nonEmpty) List(new BuyCommand(enemyEdge.head._2, availablePlatinum / 20))
+  else if (edge.nonEmpty) List(new BuyCommand(edge.head._2, availablePlatinum / 20))
+  else List(new BuyCommand(sorted.head._2, availablePlatinum / 20))
 }
 
