@@ -2,8 +2,6 @@
 import java.util.concurrent.TimeUnit
 
 import scala.collection.immutable.HashMap
-import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent._
 import scala.concurrent.duration.Duration
 import scala.language.postfixOps
 
@@ -160,64 +158,6 @@ class BFSMoveStrategy(board: Board, player: Int) extends MoveStrategy {
     (_ICanProduceMorePodsNextTurn && enemyIsWithin8Moves) || _IAmDominating
   }
 }
-
-class PriorityMoveStrategy(board: Board, playerId: Int) extends MoveStrategy {
-  private var isReady = false
-  var zoneMoveMap = new HashMap[Zone, List[Path]]
-
-  def ready() = isReady
-
-  override def printMoves(maxComputeTime: Duration): Unit = {
-    if (!isReady) return
-
-  }
-
-  def prepare(initialZone: Zone): Unit = {
-    getPriorityPathsForZone(initialZone) onComplete (r => {
-      isReady = true
-      val thingies = r.get
-      thingies.foreach(path => {
-        var intermediateMoves = path.moves
-        do {
-          val origin = board.zones.get(intermediateMoves.head.origin).get
-          val pathsForZone = zoneMoveMap.get(origin)
-          val newPath = new Path(origin, path.destination, intermediateMoves)
-          if (pathsForZone.isDefined) zoneMoveMap = zoneMoveMap.updated(origin, newPath :: pathsForZone.get)
-          else zoneMoveMap = zoneMoveMap.updated(origin, List(newPath))
-
-          intermediateMoves = intermediateMoves.tail
-        } while (intermediateMoves.size > 0)
-      })
-      Console.err.println(r.get.size)
-    })
-  }
-
-  private
-  def getPriorityPathsForZone(zone: Zone): Future[Iterable[Path]] = {
-    val p = Promise[Iterable[Path]]()
-    val priorityTargets = getPriorityTargetsForPlayer
-    val f = Future {
-      val allPathsForZone = board.from(zone)
-
-      val pathsToPriorityTargets = for {
-        singlePath <- allPathsForZone
-        if priorityTargets.contains(singlePath.destination)
-      } yield singlePath
-      pathsToPriorityTargets.groupBy(path => path.destination).map { case (destination, paths) => paths.sortWith { case (pathA, pathB) => pathA.moves.size < pathB.moves.size}.head}
-    }
-
-    f onComplete (x => p.complete(x))
-    p.future
-  }
-
-  def getPriorityTargetsForPlayer: List[Zone] = {
-    board.zones
-      .filter { case (zoneId, zone) => zone.platinumSource > 0 || (zone.isHeadquarters && zone.owner != playerId)}
-      .map { case (zoneId, zone) => zone}
-      .toList
-  }
-}
-
 
 trait NumPodsToMoveStrategy {
   def getNumToMove(zone: Zone): Int
