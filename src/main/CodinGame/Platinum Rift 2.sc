@@ -25,25 +25,15 @@ class Move(val origin: Int, val destination: Int) {
 
 
 class Board(val zones: HashMap[Int, Zone], val adjacencyList: Map[Int, Set[Int]]) {
-  def neighborsWithHistory(path: Path): Stream[Path] = {
-    val adjacentZones = adjacencyList.get(path.destination.id).get
-    if (adjacentZones.isEmpty) Stream()
-    else
-      adjacentZones
-        .map(zoneId => new Path(path.origin, zones.get(zoneId).get, path.moves ++ List(new Move(path.destination.id, zoneId))))
-        .toStream
-  }
+  def zonesOwnedByPlayer(playerId: Int): Iterable[Zone] =
+    zones.filter { case (zoneId, zone) => zone.occupants.exists(pod => pod.owner == playerId)}.map(m => m._2)
+
+  def playerPlatinumProduction(playerId: Int): Int =
+    zonesOwnedByPlayer(playerId).foldRight(0) { case (zone, acc) => zone.platinumSource + acc}
 
   def getPlayerPodSizeForZone(zoneId: Int, playerId: Int): Int = {
     val pod = zones.get(zoneId).get.occupants.filter(p => p.owner == playerId)
     pod.headOption.map(_.size).getOrElse(0)
-  }
-
-  private
-  def zoneAdjacentOwnersCheck(p: Int => Boolean)(zoneId: Int, playerId: Int): Boolean = {
-    adjacencyList.get(zoneId).get
-      .map(zoneId => zones.get(zoneId).get.owner)
-      .exists(p)
   }
 
   def zoneHasAdjacentNotOwnedByPlayer(zoneId: Int, playerId: Int): Boolean =
@@ -52,8 +42,12 @@ class Board(val zones: HashMap[Int, Zone], val adjacencyList: Map[Int, Set[Int]]
   def zoneHasAdjacentOwnedByDifferentPlayer(zoneId: Int, playerId: Int): Boolean =
     zoneAdjacentOwnersCheck(ownerId => ownerId != playerId && ownerId != -1)(zoneId, playerId)
 
-  def newNeighborsOnly(neighbors: Stream[Path], explored: Set[Zone]): Stream[Path] =
-    neighbors.filter(path => !explored.contains(path.destination))
+  private
+  def zoneAdjacentOwnersCheck(p: Int => Boolean)(zoneId: Int, playerId: Int): Boolean = {
+    adjacencyList.get(zoneId).get
+      .map(zoneId => zones.get(zoneId).get.owner)
+      .exists(p)
+  }
 
   def from(startZone: Zone): Stream[Path] = {
     def iter(initial: Stream[Path], visitQueue: List[Path], explored: Set[Zone]): Stream[Path] = {
@@ -72,6 +66,18 @@ class Board(val zones: HashMap[Int, Zone], val adjacencyList: Map[Int, Set[Int]]
 
     iter(List().toStream, List(new Path(startZone, startZone, List())), Set(startZone))
   }
+
+  def neighborsWithHistory(path: Path): Stream[Path] = {
+    val adjacentZones = adjacencyList.get(path.destination.id).get
+    if (adjacentZones.isEmpty) Stream()
+    else
+      adjacentZones
+        .map(zoneId => new Path(path.origin, zones.get(zoneId).get, path.moves ++ List(new Move(path.destination.id, zoneId))))
+        .toStream
+  }
+
+  def newNeighborsOnly(neighbors: Stream[Path], explored: Set[Zone]): Stream[Path] =
+    neighbors.filter(path => !explored.contains(path.destination))
 }
 
 trait MoveStrategy {
@@ -86,19 +92,26 @@ class BFSMoveStrategy(board: Board, player: Int) extends MoveStrategy {
 
   override def printMoves(maxComputeTime: Duration) = {
     val startTime = System.currentTimeMillis
-    val zonesWithPlayerPods = board.zones.filter { case (zoneId, zone) => zone.occupants.exists(pod => pod.owner == player)}
+    val zonesWithPlayerPods = board.zonesOwnedByPlayer(player)
     zonesWithPlayerPods
       .toIterator
       .takeWhile(_ => System.currentTimeMillis - startTime < maxComputeTime.toMillis)
-      .foreach { case (zoneId, zone) => printMoveForZone(zone)}
+      .foreach { zone => printMoveForZone(zone)}
     println("")
   }
 
   private
   def printMoveForZone(zone: Zone) = {
     val pathMonad = getPathsForZone(zone).find(f => f.moves.size > 0).headOption
-    val podsToMove = new HalfPodMoveStrategy(board, player).getNumToMove(zone)
-    pathMonad.foreach(path => print(podsToMove + " " + path.moves.head.origin + " " + path.moves.head.destination + " "))
+    for( path <- pathMonad) {
+      if(path.destination.isHeadquarters){
+        val podsToMove = board.getPlayerPodSizeForZone(zone.id, player)
+        print(podsToMove + " " + path.moves.head.origin + " " + path.moves.head.destination + " ")
+      }else{
+        val podsToMove = new HalfPodMoveStrategy(board, player).getNumToMove(zone)
+        print(podsToMove + " " + path.moves.head.origin + " " + path.moves.head.destination + " ")
+      }
+    }
   }
 
   private
@@ -106,7 +119,7 @@ class BFSMoveStrategy(board: Board, player: Int) extends MoveStrategy {
     val startTime = System.currentTimeMillis()
     if (!pathCache.get(startZone).isDefined) {
       val moves = board.from(startZone).toIterator
-      val movesWithinX = moves.takeWhile { case path =>System.currentTimeMillis - startTime < 20 && path.moves.size < 40}
+      val movesWithinX = moves.takeWhile { case path => System.currentTimeMillis - startTime < 20 && path.moves.size < 40}
         .toList
       val sorted = movesWithinX.sortWith { case (pathA, pathB) =>
         pathA.moves.size - pathA.destination.platinumSource < pathB.moves.size - pathB.destination.platinumSource
@@ -119,12 +132,32 @@ class BFSMoveStrategy(board: Board, player: Int) extends MoveStrategy {
   private
   def prioritizePaths(paths: List[Path]): List[Path] = {
     val unowned = paths.filter(f => f.destination.owner != player)
-    if (unowned.exists(path => path.destination.platinumSource > 0 || path.destination.isHeadquarters)){
+    if(shouldTargetHeadquarters(unowned)){
+      unowned.filter(path => path.destination.isHeadquarters)
+    }
+    else if (unowned.exists(path => path.destination.platinumSource > 0 || path.destination.isHeadquarters)) {
       unowned.filter(path => path.destination.platinumSource > 0 || path.destination.isHeadquarters).toList
     }
-    else{
+    else {
       unowned.toList
     }
+  }
+
+  private
+  def shouldTargetHeadquarters(pathsToUnownedZones: List[Path]): Boolean = {
+    val myProduction = board.playerPlatinumProduction(player)
+    val otherProduction = board.playerPlatinumProduction(1)
+    val _ICanProduceMorePodsNextTurn = myProduction - otherProduction > 20
+    val _IAmDominating = myProduction - otherProduction > 40
+    val enemyIsWithin8Moves = {
+      val pathToHeadquartersMonad = pathsToUnownedZones.find(path => path.destination.isHeadquarters)
+      pathToHeadquartersMonad match {
+        case Some(path) => path.moves.size < 9
+        case _ => false
+      }
+    }
+
+    (_ICanProduceMorePodsNextTurn && enemyIsWithin8Moves) || _IAmDominating
   }
 }
 
