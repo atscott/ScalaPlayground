@@ -1,4 +1,6 @@
 
+import java.util.concurrent.TimeUnit
+
 import scala.collection.immutable.HashMap
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent._
@@ -54,56 +56,153 @@ class Board(val zones: HashMap[Int, Zone], val adjacencyList: Map[Int, Set[Int]]
     neighbors.filter(path => !explored.contains(path.destination))
 
   def from(startZone: Zone): Stream[Path] = {
-    def iter(initial: Stream[Path], explored: Set[Zone]): Stream[Path] = {
-      if (initial.isEmpty) Stream.empty
-      val possibleMoves = for {
-        path <- initial
-        possibleMove <- newNeighborsOnly(neighborsWithHistory(path), explored)
-      } yield possibleMove
-      val updatedExplored = explored ++ possibleMoves.map(f => f.destination)
-      if (possibleMoves.isEmpty) initial
-      else initial #::: iter(possibleMoves.toStream, updatedExplored)
+    def iter(initial: Stream[Path], visitQueue: List[Path], explored: Set[Zone]): Stream[Path] = {
+      if (visitQueue.isEmpty) initial
+      else {
+        val possibleMoves = for {
+          path <- visitQueue
+          possibleMove <- newNeighborsOnly(neighborsWithHistory(path), explored)
+        } yield possibleMove
+        val filteredVisitQueue = visitQueue.filter(path => !explored.contains(path.destination))
+        val updatedExplored = explored ++ visitQueue.map(path => path.destination)
+        val uniqueMoves = possibleMoves.groupBy(g => g.destination).map(m => m._2.head).toList
+        initial #::: iter(filteredVisitQueue.toStream, uniqueMoves, updatedExplored)
+      }
     }
 
-    iter(Stream(new Path(startZone, startZone, List())), Set(startZone))
+    iter(List().toStream, List(new Path(startZone, startZone, List())), Set(startZone))
   }
 }
 
 trait MoveStrategy {
-  def printMoves(b: Board, player: Int, maxComputeTime: Duration) = print("WAIT")
+  def printMoves(maxComputeTime: Duration) = print("WAIT")
 }
 
 class DefaultMoveStrategy extends MoveStrategy
 
-class Week1And2MoveStrategy extends MoveStrategy {
-  override def printMoves(b: Board, player: Int, maxComputeTime: Duration) = {
+
+class BFSMoveStrategy(board: Board, player: Int) extends MoveStrategy {
+  var pathCache = new HashMap[Zone, List[Path]]
+
+  override def printMoves(maxComputeTime: Duration) = {
     val startTime = System.currentTimeMillis
-    val zonesWithPlayerPods = b.zones.filter { case (zoneId, zone) => zone.occupants.exists(pod => pod.owner == player)}
+    val zonesWithPlayerPods = board.zones.filter { case (zoneId, zone) => zone.occupants.exists(pod => pod.owner == player)}
     zonesWithPlayerPods
       .toIterator
       .takeWhile(_ => System.currentTimeMillis - startTime < maxComputeTime.toMillis)
-      .foreach { case (zoneId, zone) =>
-      val a = getTargetMoveZone(b, zone, player).find(f => f.moves.size > 0)
-      a.foreach(s => print(1 + " " + s.moves.head.origin + " " + s.moves.head.destination + " "))
-    }
+      .foreach { case (zoneId, zone) => printMoveForZone(zone)}
     println("")
   }
 
   private
-  def getTargetMoveZone(board: Board, startZone: Zone, player: Int): Stream[Path] = {
-    val moves = board.from(startZone)
-    val movesWithinX = moves.takeWhile { case path => path.moves.size < 15}
-    val sorted = movesWithinX.sortWith { case (pathA, pathB) =>
-      pathA.moves.size - pathA.destination.platinumSource > pathB.moves.size - pathB.destination.platinumSource
+  def printMoveForZone(zone: Zone) = {
+    val pathMonad = getPathsForZone(zone).find(f => f.moves.size > 0).headOption
+    val podsToMove = new HalfPodMoveStrategy(board, player).getNumToMove(zone)
+    pathMonad.foreach(path => print(podsToMove + " " + path.moves.head.origin + " " + path.moves.head.destination + " "))
+  }
+
+  private
+  def getPathsForZone(startZone: Zone): List[Path] = {
+    val startTime = System.currentTimeMillis()
+    if (!pathCache.get(startZone).isDefined) {
+      val moves = board.from(startZone).toIterator
+      val movesWithinX = moves.takeWhile { case path =>System.currentTimeMillis - startTime < 20 && path.moves.size < 40}
+        .toList
+      val sorted = movesWithinX.sortWith { case (pathA, pathB) =>
+        pathA.moves.size - pathA.destination.platinumSource < pathB.moves.size - pathB.destination.platinumSource
+      }
+      pathCache = pathCache.updated(startZone, sorted.toList)
     }
-    val unowned = sorted.filter(f => f.destination.owner != player)
-    if (unowned.exists(path => path.destination.platinumSource > 0 || path.destination.isHeadquarters))
-      unowned.filter(path => path.destination.platinumSource > 0 || path.destination.isHeadquarters)
-    else
-      unowned
+    prioritizePaths(pathCache.get(startZone).get)
+  }
+
+  private
+  def prioritizePaths(paths: List[Path]): List[Path] = {
+    val unowned = paths.filter(f => f.destination.owner != player)
+    if (unowned.exists(path => path.destination.platinumSource > 0 || path.destination.isHeadquarters)){
+      unowned.filter(path => path.destination.platinumSource > 0 || path.destination.isHeadquarters).toList
+    }
+    else{
+      unowned.toList
+    }
   }
 }
 
+class PriorityMoveStrategy(board: Board, playerId: Int) extends MoveStrategy {
+  private var isReady = false
+  var zoneMoveMap = new HashMap[Zone, List[Path]]
+
+  def ready() = isReady
+
+  override def printMoves(maxComputeTime: Duration): Unit = {
+    if (!isReady) return
+
+  }
+
+  def prepare(initialZone: Zone): Unit = {
+    getPriorityPathsForZone(initialZone) onComplete (r => {
+      isReady = true
+      val thingies = r.get
+      thingies.foreach(path => {
+        var intermediateMoves = path.moves
+        do {
+          val origin = board.zones.get(intermediateMoves.head.origin).get
+          val pathsForZone = zoneMoveMap.get(origin)
+          val newPath = new Path(origin, path.destination, intermediateMoves)
+          if (pathsForZone.isDefined) zoneMoveMap = zoneMoveMap.updated(origin, newPath :: pathsForZone.get)
+          else zoneMoveMap = zoneMoveMap.updated(origin, List(newPath))
+
+          intermediateMoves = intermediateMoves.tail
+        } while (intermediateMoves.size > 0)
+      })
+      Console.err.println(r.get.size)
+    })
+  }
+
+  private
+  def getPriorityPathsForZone(zone: Zone): Future[Iterable[Path]] = {
+    val p = Promise[Iterable[Path]]()
+    val priorityTargets = getPriorityTargetsForPlayer
+    val f = Future {
+      val allPathsForZone = board.from(zone)
+
+      val pathsToPriorityTargets = for {
+        singlePath <- allPathsForZone
+        if priorityTargets.contains(singlePath.destination)
+      } yield singlePath
+      pathsToPriorityTargets.groupBy(path => path.destination).map { case (destination, paths) => paths.sortWith { case (pathA, pathB) => pathA.moves.size < pathB.moves.size}.head}
+    }
+
+    f onComplete (x => p.complete(x))
+    p.future
+  }
+
+  def getPriorityTargetsForPlayer: List[Zone] = {
+    board.zones
+      .filter { case (zoneId, zone) => zone.platinumSource > 0 || (zone.isHeadquarters && zone.owner != playerId)}
+      .map { case (zoneId, zone) => zone}
+      .toList
+  }
+}
+
+
+trait NumPodsToMoveStrategy {
+  def getNumToMove(zone: Zone): Int
+}
+
+class HalfPodMoveStrategy(board: Board, player: Int) extends NumPodsToMoveStrategy {
+  def getNumToMove(zone: Zone): Int = {
+    val myPodsInZone = board.getPlayerPodSizeForZone(zone.id, player)
+    if (zone.isHeadquarters)
+      if (myPodsInZone > 4)
+        myPodsInZone - 4
+      else
+        0
+    else {
+      (myPodsInZone / 2.0 + 0.5).toInt
+    }
+  }
+}
 
 trait BuyStrategy {
   def printBuys(board: Board, player: Int, availablePlatinum: Int) = println("WAIT")
@@ -134,38 +233,12 @@ class Week1And2BuyStrategy extends BuyStrategy {
 }
 
 
-def getPriorityPathsForZone(board: Board, zone: Zone): Future[Iterable[Path]] = {
-  val p = Promise[Iterable[Path]]()
-  val priorityTargets = getPriorityTargetsForPlayer(board, 0)
-  val f = Future {
-    val allPathsForZone = board.from(zone)
-
-    for {
-      singlePath <- allPathsForZone
-      if priorityTargets.contains(singlePath.destination)
-    } yield singlePath
-  }
-
-  f onComplete (x => p.complete(x))
-  p.future
-}
-
-def getPriorityTargetsForPlayer(board: Board, playerId: Int): List[Zone] = {
-  board.zones
-    .filter { case (zoneId, zone) => zone.platinumSource > 0 || (zone.isHeadquarters && zone.owner != playerId)}
-    .map { case (zoneId, zone) => zone}
-    .toList
-}
-
 val zones = List(new Zone(1, 1, -1, List(new Pod(0, 1)), true), new Zone(2, 0, -1, List(), false), new Zone(3, 4, -1, List(), false))
 val zm = HashMap(zones.map(m => (m.id, m)): _*)
 val adjacencies = HashMap((1, Set(2)), (2, Set(1)), (2, Set(3)), (3, Set(2)))
 val board = new Board(zm, adjacencies)
 (new DefaultBuyStrategy).printBuys(board, 0, 1)
-(new Week1And2MoveStrategy).printMoves(board, 0, Duration.Inf)
+new BFSMoveStrategy(board, 0).printMoves(Duration(1000, TimeUnit.MILLISECONDS))
 board.getPlayerPodSizeForZone(1, 0)
 
-
-getPriorityPathsForZone(board, zones.head)
-
-(new Week1And2MoveStrategy).printMoves(board, 0, Duration.Inf)
+new BFSMoveStrategy(board, 0).printMoves(Duration(1000, TimeUnit.MILLISECONDS))
