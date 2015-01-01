@@ -2,8 +2,10 @@
 import java.util.concurrent.TimeUnit
 
 import scala.collection.immutable.HashMap
+import scala.concurrent.{Await, Future, Promise}
 import scala.concurrent.duration.Duration
 import scala.language.postfixOps
+import scala.util.Try
 
 class Path(val origin: Zone, val destination: Zone, val moves: List[Move])
 
@@ -87,6 +89,7 @@ class DefaultMoveStrategy extends MoveStrategy
 
 class BFSMoveStrategy(board: Board, player: Int) extends MoveStrategy {
   var pathCache = new HashMap[Zone, List[Path]]
+  var timedOutWhileGettingPaths = List[Zone]()
 
   override def printMoves(maxComputeTime: Duration) = {
     val startTime = System.currentTimeMillis
@@ -94,58 +97,67 @@ class BFSMoveStrategy(board: Board, player: Int) extends MoveStrategy {
     zonesWithPlayerPods
       .toIterator
       .takeWhile(_ => System.currentTimeMillis - startTime < maxComputeTime.toMillis)
-      .foreach { zone => printMoveForZone(zone)}
+      .foreach { zone => printMoveForZone(zone, Duration(maxComputeTime.toMillis - (System.currentTimeMillis - startTime), TimeUnit.MILLISECONDS))}
     println("")
   }
 
   private
-  def printMoveForZone(zone: Zone) = {
+  def printMoveForZone(zone: Zone, maxComputeTime: Duration) = {
     val podsInZone = board.getPlayerPodSizeForZone(zone.id, player)
-    val paths = getPathsForZone(zone).filter(f => f.moves.size > 0).take(podsInZone)
-    val podsToMove = (podsInZone / paths.size + 0.5).toInt
-    for (path <- paths) {
-      if (path.destination.isHeadquarters) {
-        print(podsToMove + " " + path.moves.head.origin + " " + path.moves.head.destination + " ")
-      } else {
-        print(podsToMove + " " + path.moves.head.origin + " " + path.moves.head.destination + " ")
+    try {
+      val paths = Await.result(getPathsForZone(zone), maxComputeTime).filter(f => f.moves.size > 0).take(podsInZone)
+      val podsToMove = (podsInZone / paths.size + 0.5).toInt
+      for (path <- paths) {
+        if (path.destination.isHeadquarters) {
+          print(podsToMove + " " + path.moves.head.origin + " " + path.moves.head.destination + " ")
+        } else {
+          print(podsToMove + " " + path.moves.head.origin + " " + path.moves.head.destination + " ")
+        }
       }
+    } catch {
+      case _: Throwable => timedOutWhileGettingPaths = zone :: timedOutWhileGettingPaths
     }
   }
 
   private
-  def getPathsForZone(startZone: Zone): List[Path] = {
-    val startTime = System.currentTimeMillis()
-    if (!pathCache.get(startZone).isDefined) {
-      val moves = board.from(startZone).toIterator
-      val movesWithinX = moves.takeWhile { case path => System.currentTimeMillis - startTime < 20 && path.moves.size < 40}
-        .toList
-      val sorted = movesWithinX.sortWith { case (pathA, pathB) =>
-        pathA.moves.size - pathA.destination.platinumSource < pathB.moves.size - pathB.destination.platinumSource
+  def getPathsForZone(startZone: Zone): Future[List[Path]] = {
+    val p = Promise[List[Path]]()
+    Future {
+      val startTime = System.currentTimeMillis()
+      if (!pathCache.get(startZone).isDefined && !timedOutWhileGettingPaths.contains(startZone)) {
+        val moves = board.from(startZone).toIterator
+        val movesWithinX = moves.takeWhile { case path => System.currentTimeMillis - startTime < 20 && path.moves.size < 40}
+          .toList
+        val sorted = movesWithinX.sortWith { case (pathA, pathB) =>
+          pathA.moves.size - pathA.destination.platinumSource < pathB.moves.size - pathB.destination.platinumSource
+        }
+        pathCache = pathCache.updated(startZone, sorted.toList)
+        timedOutWhileGettingPaths = timedOutWhileGettingPaths.filter(f => f != startZone)
       }
-      pathCache = pathCache.updated(startZone, sorted.toList)
+      p complete Try(prioritizePaths(pathCache.get(startZone).get))
     }
-    prioritizePaths(pathCache.get(startZone).get)
+    p.future
   }
+
 
   private
   def prioritizePaths(paths: List[Path]): List[Path] = {
     val unowned = paths.filter(f => f.destination.owner != player)
+    val priorityZones = unowned.filter(path => path.destination.platinumSource > 0)
     if (shouldTargetHeadquarters(unowned)) {
-      unowned.filter(path => path.destination.isHeadquarters)
+      unowned.filter(path => path.destination.isHeadquarters) ++ priorityZones
     }
-    else if (unowned.exists(path => path.destination.platinumSource > 0 || path.destination.isHeadquarters)) {
-      unowned.filter(path => path.destination.platinumSource > 0 || path.destination.isHeadquarters).toList
-    }
-    else {
+    else if (priorityZones.size > 0)
+      priorityZones.toList
+    else
       unowned.toList
-    }
   }
 
   private
   def shouldTargetHeadquarters(pathsToUnownedZones: List[Path]): Boolean = {
     val myProduction = board.playerPlatinumProduction(player)
     val otherProduction = board.playerPlatinumProduction(1)
-    val _ICanProduceMorePodsNextTurn = myProduction - otherProduction > 20
+    val _ICanProduceMorePods = myProduction - otherProduction > 10
     val _IAmDominating = myProduction - otherProduction > 30
     val enemyIsWithin8Moves = {
       val pathToHeadquartersMonad = pathsToUnownedZones.find(path => path.destination.isHeadquarters)
@@ -155,7 +167,7 @@ class BFSMoveStrategy(board: Board, player: Int) extends MoveStrategy {
       }
     }
 
-    (_ICanProduceMorePodsNextTurn && enemyIsWithin8Moves) || _IAmDominating
+    (_ICanProduceMorePods && enemyIsWithin8Moves) || _IAmDominating
   }
 }
 
