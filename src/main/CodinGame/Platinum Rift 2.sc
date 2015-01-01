@@ -100,13 +100,13 @@ class BFSMoveStrategy(board: Board, player: Int) extends MoveStrategy {
 
   private
   def printMoveForZone(zone: Zone) = {
-    val pathMonad = getPathsForZone(zone).find(f => f.moves.size > 0).headOption
-    for( path <- pathMonad) {
-      if(path.destination.isHeadquarters){
-        val podsToMove = board.getPlayerPodSizeForZone(zone.id, player)
+    val podsInZone = board.getPlayerPodSizeForZone(zone.id, player)
+    val paths = getPathsForZone(zone).filter(f => f.moves.size > 0).take(podsInZone)
+    val podsToMove = (podsInZone / paths.size + 0.5).toInt
+    for (path <- paths) {
+      if (path.destination.isHeadquarters) {
         print(podsToMove + " " + path.moves.head.origin + " " + path.moves.head.destination + " ")
-      }else{
-        val podsToMove = new HalfPodMoveStrategy(board, player).getNumToMove(zone)
+      } else {
         print(podsToMove + " " + path.moves.head.origin + " " + path.moves.head.destination + " ")
       }
     }
@@ -130,7 +130,7 @@ class BFSMoveStrategy(board: Board, player: Int) extends MoveStrategy {
   private
   def prioritizePaths(paths: List[Path]): List[Path] = {
     val unowned = paths.filter(f => f.destination.owner != player)
-    if(shouldTargetHeadquarters(unowned)){
+    if (shouldTargetHeadquarters(unowned)) {
       unowned.filter(path => path.destination.isHeadquarters)
     }
     else if (unowned.exists(path => path.destination.platinumSource > 0 || path.destination.isHeadquarters)) {
@@ -146,7 +146,7 @@ class BFSMoveStrategy(board: Board, player: Int) extends MoveStrategy {
     val myProduction = board.playerPlatinumProduction(player)
     val otherProduction = board.playerPlatinumProduction(1)
     val _ICanProduceMorePodsNextTurn = myProduction - otherProduction > 20
-    val _IAmDominating = myProduction - otherProduction > 40
+    val _IAmDominating = myProduction - otherProduction > 30
     val enemyIsWithin8Moves = {
       val pathToHeadquartersMonad = pathsToUnownedZones.find(path => path.destination.isHeadquarters)
       pathToHeadquartersMonad match {
