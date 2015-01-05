@@ -2,8 +2,8 @@
 import java.util.concurrent.TimeUnit
 
 import scala.collection.immutable.HashMap
-import scala.concurrent.{Await, Future, Promise}
 import scala.concurrent.duration.Duration
+import scala.concurrent.{Future, Promise}
 import scala.language.postfixOps
 import scala.util.Try
 
@@ -81,42 +81,51 @@ class Board(val zones: HashMap[Int, Zone], val adjacencyList: Map[Int, Set[Int]]
 }
 
 trait MoveStrategy {
-  def printMoves(maxComputeTime: Duration) = print("WAIT")
+  def printMoves(maxComputeTime: Duration): Future[Unit] = {
+    print("WAIT"); Future {}
+  }
 }
 
 class DefaultMoveStrategy extends MoveStrategy
 
-
 class BFSMoveStrategy(board: Board, player: Int) extends MoveStrategy {
   var pathCache = new HashMap[Zone, List[Path]]
   var timedOutWhileGettingPaths = List[Zone]()
+  var distanceBetweenHeadquarters = 9999
 
-  override def printMoves(maxComputeTime: Duration) = {
+  override def printMoves(maxComputeTime: Duration): Future[Unit] = {
     val startTime = System.currentTimeMillis
     val zonesWithPlayerPods = board.zonesOwnedByPlayer(player)
-    zonesWithPlayerPods
-      .toIterator
-      .takeWhile(_ => System.currentTimeMillis - startTime < maxComputeTime.toMillis)
-      .foreach { zone => printMoveForZone(zone, Duration(maxComputeTime.toMillis - (System.currentTimeMillis - startTime), TimeUnit.MILLISECONDS))}
-    println("")
+    val futures = zonesWithPlayerPods
+      .map { zone => printMoveForZone(zone, Duration(maxComputeTime.toMillis - (System.currentTimeMillis - startTime), TimeUnit.MILLISECONDS))}
+
+    val p = Promise[Unit]()
+    all(futures.toList).onComplete(_ => p complete Try())
+    p.future
   }
 
   private
-  def printMoveForZone(zone: Zone, maxComputeTime: Duration) = {
+  def printMoveForZone(zone: Zone, maxComputeTime: Duration): Future[Unit] = {
+    val p = Promise[Unit]()
+    val startTime = System.currentTimeMillis
     val podsInZone = board.getPlayerPodSizeForZone(zone.id, player)
-    try {
-      val paths = Await.result(getPathsForZone(zone), maxComputeTime).filter(f => f.moves.size > 0).take(podsInZone)
-      val podsToMove = (podsInZone / paths.size + 0.5).toInt
-      for (path <- paths) {
-        if (path.destination.isHeadquarters) {
-          print(podsToMove + " " + path.moves.head.origin + " " + path.moves.head.destination + " ")
-        } else {
-          print(podsToMove + " " + path.moves.head.origin + " " + path.moves.head.destination + " ")
+    getPathsForZone(zone) onComplete (r => {
+      if (r.isSuccess && System.currentTimeMillis - startTime < maxComputeTime.toMillis)
+      {
+        val paths = r.get
+        val filteredPaths = paths.filter(f => f.moves.size > 0).take(podsInZone)
+        val podsToMove = (podsInZone / filteredPaths.size + 0.5).toInt
+        for (path <- filteredPaths) {
+          if (path.destination.isHeadquarters) {
+            print(podsToMove + " " + path.moves.head.origin + " " + path.moves.head.destination + " ")
+          } else {
+            print(podsToMove + " " + path.moves.head.origin + " " + path.moves.head.destination + " ")
+          }
         }
       }
-    } catch {
-      case _: Throwable => timedOutWhileGettingPaths = zone :: timedOutWhileGettingPaths
-    }
+      p complete Try()
+    })
+    p.future
   }
 
   private
@@ -126,7 +135,7 @@ class BFSMoveStrategy(board: Board, player: Int) extends MoveStrategy {
       val startTime = System.currentTimeMillis()
       if (!pathCache.get(startZone).isDefined && !timedOutWhileGettingPaths.contains(startZone)) {
         val moves = board.from(startZone).toIterator
-        val movesWithinX = moves.takeWhile { case path => System.currentTimeMillis - startTime < 20 && path.moves.size < 40}
+        val movesWithinX = moves.takeWhile { case path => System.currentTimeMillis - startTime < 20}
           .toList
         val sorted = movesWithinX.sortWith { case (pathA, pathB) =>
           pathA.moves.size - pathA.destination.platinumSource < pathB.moves.size - pathB.destination.platinumSource
@@ -139,25 +148,32 @@ class BFSMoveStrategy(board: Board, player: Int) extends MoveStrategy {
     p.future
   }
 
-
   private
   def prioritizePaths(paths: List[Path]): List[Path] = {
     val unowned = paths.filter(f => f.destination.owner != player)
-    val priorityZones = unowned.filter(path => path.destination.platinumSource > 0)
     if (shouldTargetHeadquarters(unowned)) {
-      unowned.filter(path => path.destination.isHeadquarters) ++ priorityZones
+      unowned.filter(path => path.destination.isHeadquarters)
     }
-    else if (priorityZones.size > 0)
-      priorityZones.toList
-    else
+    else if (unowned.exists(path => path.destination.platinumSource > 0 || path.destination.isHeadquarters)) {
+      unowned.filter(path => path.destination.platinumSource > 0 || path.destination.isHeadquarters).toList
+    }
+    else {
       unowned.toList
+    }
   }
 
   private
   def shouldTargetHeadquarters(pathsToUnownedZones: List[Path]): Boolean = {
+    if (distanceBetweenHeadquarters == 9999) {
+      if (pathsToUnownedZones.head.origin.isHeadquarters) {
+        for (path <- pathsToUnownedZones.find(path => path.destination.isHeadquarters)) {
+          distanceBetweenHeadquarters = path.moves.size
+        }
+      }
+    }
     val myProduction = board.playerPlatinumProduction(player)
     val otherProduction = board.playerPlatinumProduction(1)
-    val _ICanProduceMorePods = myProduction - otherProduction > 10
+    val _ICanProduceMorePodsNextTurn = myProduction - otherProduction > 20
     val _IAmDominating = myProduction - otherProduction > 30
     val enemyIsWithin8Moves = {
       val pathToHeadquartersMonad = pathsToUnownedZones.find(path => path.destination.isHeadquarters)
@@ -167,7 +183,15 @@ class BFSMoveStrategy(board: Board, player: Int) extends MoveStrategy {
       }
     }
 
-    (_ICanProduceMorePods && enemyIsWithin8Moves) || _IAmDominating
+    (_ICanProduceMorePodsNextTurn && enemyIsWithin8Moves) || _IAmDominating || distanceBetweenHeadquarters < 9
+  }
+
+  def all[T](fs: List[Future[T]]): Future[List[T]] = {
+    val successful = Promise[List[T]]()
+    successful.success(Nil)
+    fs.foldRight(successful.future) {
+      (f, acc) => for {x <- f; xs <- acc} yield x :: xs
+    }
   }
 }
 
