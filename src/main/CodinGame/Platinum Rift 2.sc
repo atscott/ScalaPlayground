@@ -139,11 +139,7 @@ object Player {
         val paths = Await.result(getPathsForZone(zone), maxComputeTime).filter(f => f.moves.size > 0).take(podsInZone)
         val podsToMove = (podsInZone / paths.size + 0.5).toInt
         for (path <- paths) {
-          if (path.destination.isHeadquarters) {
             print(podsToMove + " " + path.moves.head.origin + " " + path.moves.head.destination + " ")
-          } else {
-            print(podsToMove + " " + path.moves.head.origin + " " + path.moves.head.destination + " ")
-          }
         }
       } catch {
         case _: Throwable => timedOutWhileGettingPaths = zone :: timedOutWhileGettingPaths
@@ -176,7 +172,7 @@ object Player {
       val unowned = paths.filter(f => f.destination.owner != player)
       val priorityZones = unowned.filter(path => path.destination.platinumSource > 0)
       if (shouldTargetHeadquarters(unowned)) {
-        unowned.filter(path => path.destination.isHeadquarters) ++ priorityZones
+        unowned.filter(path => path.destination.isHeadquarters)
       }
       else if (priorityZones.size > 0)
         priorityZones.toList
