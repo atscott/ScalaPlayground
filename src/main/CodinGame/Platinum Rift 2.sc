@@ -139,7 +139,7 @@ object Player {
         val paths = Await.result(getPathsForZone(zone), maxComputeTime).filter(f => f.moves.size > 0).take(podsInZone)
         val podsToMove = (podsInZone / paths.size + 0.5).toInt
         for (path <- paths) {
-            print(podsToMove + " " + path.moves.head.origin + " " + path.moves.head.destination + " ")
+          print(podsToMove + " " + path.moves.head.origin + " " + path.moves.head.destination + " ")
         }
       } catch {
         case _: Throwable => timedOutWhileGettingPaths = zone :: timedOutWhileGettingPaths
@@ -171,9 +171,11 @@ object Player {
     def prioritizePaths(paths: List[Path]): List[Path] = {
       val unowned = paths.filter(f => f.destination.owner != player)
       val priorityZones = unowned.filter(path => path.destination.platinumSource > 0)
-      if (shouldTargetHeadquarters(unowned)) {
-        unowned.filter(path => path.destination.isHeadquarters)
-      }
+      if (shouldTargetHeadquarters(unowned))
+        unowned.find(path => path.destination.isHeadquarters) match {
+          case Some(s) => List(s)
+          case _ => priorityZones
+        }
       else if (priorityZones.size > 0)
         priorityZones.toList
       else
@@ -192,16 +194,15 @@ object Player {
       val myProduction = board.playerPlatinumProduction(player)
       val otherProduction = board.playerPlatinumProduction(1)
       val _ICanProduceMorePodsNextTurn = myProduction - otherProduction > 20
-      val _IAmDominating = myProduction - otherProduction > 30
-      val enemyIsWithin8Moves = {
+      val enemyIsWithin7Moves = {
         val pathToHeadquartersMonad = pathsToUnownedZones.find(path => path.destination.isHeadquarters)
         pathToHeadquartersMonad match {
-          case Some(path) => path.moves.size < 9
+          case Some(path) => path.moves.size < 7
           case _ => false
         }
       }
 
-      (_ICanProduceMorePodsNextTurn && enemyIsWithin8Moves) || _IAmDominating || distanceBetweenHeadquarters < 9
+      (_ICanProduceMorePodsNextTurn && enemyIsWithin7Moves) || distanceBetweenHeadquarters < 9
     }
 
 
