@@ -124,8 +124,9 @@ object Player {
 
   class BFSMoveStrategy(board: Board, player: Int) extends MoveStrategy {
     var pathCache = new HashMap[Zone, List[Path]]
-    var timedOutWhileGettingPaths = List[Zone]()
     var distanceBetweenHeadquarters = 9999
+    var lastUsedPaths = new HashMap[Zone, List[Path]]
+    var zonesWithPathsBeingComputed: List[Zone] = Nil
 
     override def printMoves(maxComputeTime: Duration) = {
       val startTime = System.currentTimeMillis
@@ -143,32 +144,39 @@ object Player {
     def printMoveForZone(zone: Zone, maxComputeTime: Duration) = {
       val podsInZone = board.getPlayerPodSizeForZone(zone.id, player)
       try {
-        val paths = Await.result(getPathsForZone(zone), maxComputeTime).filter(f => f.moves.size > 0).take(podsInZone)
+        var paths = Await.result(getPathsForZone(zone), maxComputeTime).filter(f => f.moves.size > 0).take(podsInZone)
+        if(paths.isEmpty)
+          paths = lastUsedPaths.getOrElse(zone, List())
+        lastUsedPaths = lastUsedPaths.updated(zone, paths)
         val podsToMove = (podsInZone / paths.size + 0.5).toInt
         for (path <- paths) {
           print(podsToMove + " " + path.moves.head.origin + " " + path.moves.head.destination + " ")
         }
+
       } catch {
-        case _: Throwable => timedOutWhileGettingPaths = zone :: timedOutWhileGettingPaths
+        case _: Throwable =>
       }
     }
 
     private
     def getPathsForZone(startZone: Zone): Future[List[Path]] = {
       val p = Promise[List[Path]]()
-      Future {
-        val startTime = System.currentTimeMillis()
-        if (!pathCache.get(startZone).isDefined && !timedOutWhileGettingPaths.contains(startZone)) {
-          val moves = board.from(startZone).toIterator
-          val movesWithinX = moves.takeWhile { case path => System.currentTimeMillis - startTime < 20 && path.moves.size < 40}
-            .toList
-          val sorted = movesWithinX.sortWith { case (pathA, pathB) =>
-            pathA.moves.size - pathA.destination.platinumSource < pathB.moves.size - pathB.destination.platinumSource
+      if (zonesWithPathsBeingComputed.contains(startZone)) p complete Try(List())
+      else {
+        Future {
+          zonesWithPathsBeingComputed = startZone :: zonesWithPathsBeingComputed
+          if (!pathCache.get(startZone).isDefined ) {
+            val moves = board.from(startZone).toIterator
+            val movesWithinX = moves.takeWhile { case path => path.moves.size < 30}
+              .toList
+            val sorted = movesWithinX.sortWith { case (pathA, pathB) =>
+              pathA.moves.size - pathA.destination.platinumSource < pathB.moves.size - pathB.destination.platinumSource
+            }
+            pathCache = pathCache.updated(startZone, sorted.toList)
           }
-          pathCache = pathCache.updated(startZone, sorted.toList)
-          timedOutWhileGettingPaths = timedOutWhileGettingPaths.filter(f => f != startZone)
+          zonesWithPathsBeingComputed = zonesWithPathsBeingComputed.filter(z => z.id != startZone.id)
+          p complete Try(prioritizePaths(pathCache.get(startZone).get))
         }
-        p complete Try(prioritizePaths(pathCache.get(startZone).get))
       }
       p.future
     }
@@ -176,12 +184,16 @@ object Player {
 
     private
     def prioritizePaths(paths: List[Path]): List[Path] = {
-      if (board.getPlayerPodSizeForZone(paths.head.origin.id, player) <= board.getPlayerPodSizeForZone(paths.head.origin.id, 1)) {
+      val willLoseContestedZone: Boolean =
+        board.getPlayerPodSizeForZone(paths.head.origin.id, player) <= board.getMaxEnemyPodSizeForZone(paths.head.origin.id, player)
+
+      lazy val retreatPaths: List[Path] = {
         val uncontestedAndUnowned = paths.filter(f => f.destination.owner == -1)
         if (uncontestedAndUnowned.nonEmpty) uncontestedAndUnowned
         else paths
       }
-      else {
+
+      lazy val bestPaths: List[Path] = {
         val unowned = paths.filter(f => f.destination.owner != player)
         val priorityZones = unowned.filter(path => path.destination.platinumSource > 0)
         if (shouldTargetHeadquarters(unowned))
@@ -189,22 +201,28 @@ object Player {
             case Some(s) => List(s)
             case _ => priorityZones
           }
-        else if (priorityZones.size > 0)
+        else if (priorityZones.nonEmpty)
           priorityZones.toList
         else
           unowned.toList
       }
+
+      if (willLoseContestedZone) retreatPaths
+      else  bestPaths
     }
 
     private
     def shouldTargetHeadquarters(pathsToUnownedZones: List[Path]): Boolean = {
-      if (distanceBetweenHeadquarters == 9999) {
-        if (pathsToUnownedZones.head.origin.isHeadquarters) {
-          for (path <- pathsToUnownedZones.find(path => path.destination.isHeadquarters)) {
-            distanceBetweenHeadquarters = path.moves.size
-          }
+      def determineHeadquarterDistance() = {
+        for (path <- pathsToUnownedZones.find(path => path.destination.isHeadquarters)) {
+          distanceBetweenHeadquarters = path.moves.size
         }
       }
+      val headquarterDistanceUndetermined = distanceBetweenHeadquarters == 9999
+      lazy val startZoneIsHeadquarters = pathsToUnownedZones.head.origin.isHeadquarters
+
+      if (headquarterDistanceUndetermined && startZoneIsHeadquarters) determineHeadquarterDistance()
+
       val myProduction = board.playerPlatinumProduction(player)
       val otherProduction = board.playerPlatinumProduction(1)
       val _ICanProduceMorePodsNextTurn = myProduction - otherProduction > 20
@@ -218,8 +236,6 @@ object Player {
 
       (_ICanProduceMorePodsNextTurn && enemyIsWithin7Moves) || distanceBetweenHeadquarters < 9
     }
-
-
   }
 
   trait NumPodsToMoveStrategy {
