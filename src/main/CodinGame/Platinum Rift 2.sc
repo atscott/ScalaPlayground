@@ -37,6 +37,13 @@ object Player {
       pod.headOption.map(_.size).getOrElse(0)
     }
 
+    def getMaxEnemyPodSizeForZone(zoneId: Int, playerId: Int): Int = {
+      zones.get(zoneId).get
+        .occupants
+        .filter(pod => pod.owner != playerId)
+        .foldRight(0){case (pod, max) => math.max(pod.size, max)}
+    }
+
     def zoneHasAdjacentNotOwnedByPlayer(zoneId: Int, playerId: Int): Boolean =
       zoneAdjacentOwnersCheck(ownerId => ownerId != playerId)(zoneId, playerId)
 
@@ -169,17 +176,24 @@ object Player {
 
     private
     def prioritizePaths(paths: List[Path]): List[Path] = {
-      val unowned = paths.filter(f => f.destination.owner != player)
-      val priorityZones = unowned.filter(path => path.destination.platinumSource > 0)
-      if (shouldTargetHeadquarters(unowned))
-        unowned.find(path => path.destination.isHeadquarters) match {
-          case Some(s) => List(s)
-          case _ => priorityZones
-        }
-      else if (priorityZones.size > 0)
-        priorityZones.toList
-      else
-        unowned.toList
+      if (board.getPlayerPodSizeForZone(paths.head.origin.id, player) <= board.getPlayerPodSizeForZone(paths.head.origin.id, 1)) {
+        val uncontestedAndUnowned = paths.filter(f => f.destination.owner == -1)
+        if (uncontestedAndUnowned.nonEmpty) uncontestedAndUnowned
+        else paths
+      }
+      else {
+        val unowned = paths.filter(f => f.destination.owner != player)
+        val priorityZones = unowned.filter(path => path.destination.platinumSource > 0)
+        if (shouldTargetHeadquarters(unowned))
+          unowned.find(path => path.destination.isHeadquarters) match {
+            case Some(s) => List(s)
+            case _ => priorityZones
+          }
+        else if (priorityZones.size > 0)
+          priorityZones.toList
+        else
+          unowned.toList
+      }
     }
 
     private
