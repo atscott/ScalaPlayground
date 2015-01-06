@@ -310,7 +310,6 @@ object Player {
     val bfsMoveStrategy = new BFSMoveStrategy(board, myid)
     // game loop
     var round1 = true
-    var test: Iterable[Path] = Nil
     while (true) {
       val startTime = System.currentTimeMillis()
       val platinum = readInt // my available Platinum
@@ -334,7 +333,7 @@ object Player {
       val readTime = System.currentTimeMillis() - startTime
       Console.err.println(s"time after reading board: $readTime")
 
-      val maxWait = Duration(90 - (System.currentTimeMillis - startTime), TimeUnit.MILLISECONDS)
+      val maxWait = Duration(90, TimeUnit.MILLISECONDS)
       bfsMoveStrategy.printMoves(maxWait)
       val moveTime = System.currentTimeMillis() - startTime
       Console.err.println(s"Time after calculating moves: $moveTime")
