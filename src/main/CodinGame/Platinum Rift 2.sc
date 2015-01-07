@@ -41,8 +41,24 @@ object Player {
       zones.get(zoneId).get
         .occupants
         .filter(pod => pod.owner != playerId)
-        .foldRight(0){case (pod, max) => math.max(pod.size, max)}
+        .foldRight(0) { case (pod, max) => math.max(pod.size, max)}
     }
+
+    def numberOfEnemyPodsInPositionToTakeZone(zoneId: Int, playerId: Int): Int =
+      (for {
+        zone <- adjacentZones(zoneId)
+        if zone.owner != playerId
+      } yield {
+        zone.occupants
+          .filter(o => o.owner == zone.owner)
+          .foldRight(0)(_.size + _)
+      }).sum
+
+    def adjacentZones(zoneId: Int): Iterable[Zone] =
+      for {
+        id <- adjacencyList.get(zoneId).get
+        zone <- zones.get(id)
+      } yield zone
 
     def zoneHasAdjacentNotOwnedByPlayer(zoneId: Int, playerId: Int): Boolean =
       zoneAdjacentOwnersCheck(ownerId => ownerId != playerId)(zoneId, playerId)
@@ -145,7 +161,7 @@ object Player {
       val podsInZone = board.getPlayerPodSizeForZone(zone.id, player)
       try {
         var paths = Await.result(getPathsForZone(zone), maxComputeTime).filter(f => f.moves.size > 0).take(podsInZone)
-        if(paths.isEmpty)
+        if (paths.isEmpty)
           paths = lastUsedPaths.getOrElse(zone, List())
         lastUsedPaths = lastUsedPaths.updated(zone, paths)
         val podsToMove = (podsInZone / paths.size + 0.5).toInt
@@ -165,7 +181,7 @@ object Player {
       else {
         Future {
           zonesWithPathsBeingComputed = startZone :: zonesWithPathsBeingComputed
-          if (!pathCache.get(startZone).isDefined ) {
+          if (!pathCache.get(startZone).isDefined) {
             val moves = board.from(startZone).toIterator
             val movesWithinX = moves.takeWhile { case path => path.moves.size < 30}
               .toList
@@ -184,8 +200,20 @@ object Player {
 
     private
     def prioritizePaths(paths: List[Path]): List[Path] = {
-      val willLoseContestedZone: Boolean =
-        board.getPlayerPodSizeForZone(paths.head.origin.id, player) <= board.getMaxEnemyPodSizeForZone(paths.head.origin.id, player)
+      lazy val shouldDefend = {
+        lazy val zone = paths.head.origin
+        lazy val onlyOnePod = board.getPlayerPodSizeForZone(zone.id, player) == 1
+        lazy val adjacentEnemies = board.numberOfEnemyPodsInPositionToTakeZone(zone.id, player)
+        paths.nonEmpty && zone.platinumSource > 0 && onlyOnePod && adjacentEnemies == 1
+      }
+
+      lazy val shouldRetreat : Boolean ={
+        val zone = paths.head.origin
+        lazy val platinum = zone.platinumSource
+        lazy val myPodSize = board.getPlayerPodSizeForZone(zone.id, player)
+        lazy val enemyPodSize = board.getMaxEnemyPodSizeForZone(zone.id, player)
+        (platinum == 0 && enemyPodSize > 0) || myPodSize < enemyPodSize
+      }
 
       lazy val retreatPaths: List[Path] = {
         val uncontestedAndUnowned = paths.filter(f => f.destination.owner == -1)
@@ -207,8 +235,9 @@ object Player {
           unowned.toList
       }
 
-      if (willLoseContestedZone) retreatPaths
-      else  bestPaths
+      if (shouldDefend) List()
+      else if (shouldRetreat) retreatPaths
+      else bestPaths
     }
 
     private
