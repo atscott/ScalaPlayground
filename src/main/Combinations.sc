@@ -1,4 +1,4 @@
-def combintations(s: String) =
+def combinations(s: String) =
   (for (mask <- 1 until 1 << s.length) yield {
     (for {
       i <- 0 until s.length
@@ -6,5 +6,5 @@ def combintations(s: String) =
     } yield s.charAt(i).toString).mkString("")
   }).toList
 
-combintations("ab")
-combintations("abc")
+combinations("ab")
+combinations("abc")
