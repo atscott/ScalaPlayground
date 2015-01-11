@@ -1,4 +1,4 @@
-val ints: Stream[Int] = 0 #:: 1 #:: ints.zip(ints.tail).map(n => n._2 + 1)
+val ints: Stream[Int] = 0 #:: ints.map(_ + 1)
 
 val fizzes: Stream[String] = ints.map(i => if (i % 3 == 0) "Fizz" else "")
 val buzzes: Stream[String] = ints.map(i => if (i % 5 == 0) "Buzz" else "")
