@@ -19,7 +19,7 @@ object Player {
 
   class BuyCommand(val zone: Zone, val numToBuy: Int)
 
-  class Zone(val id: Int, val platinumSource: Int, var owner: Int, var occupants: List[Pod], var isHeadquarters: Boolean = false)
+  class Zone(val id: Int, var platinumSource: Int, var owner: Int, var occupants: List[Pod], var isHeadquarters: Boolean = false)
 
   class Move(val origin: Int, val destination: Int) {
     override def toString: String = "zone " + origin + " -> zone " + destination
@@ -323,7 +323,7 @@ object Player {
       // zoneid: this zone's ID (between 0 and zoneCount-1)
       // platinumsource: the amount of Platinum this zone can provide per game turn
       val Array(zoneid, platinumsource) = for (i <- scala.io.StdIn.readLine split " ") yield i.toInt
-      new Zone(zoneid, platinumsource, -1, List())
+      new Zone(zoneid, 6, -1, List())
     }
     val zoneMap = HashMap(zones.map(m => (m.id, m)): _*)
     val adjacentTouples = for (i <- 0 until linkcount) yield {
@@ -341,7 +341,7 @@ object Player {
     var round1 = true
     while (true) {
       val startTime = System.currentTimeMillis()
-      val platinum = readInt // my available Platinum
+      val availablePlatinum = readInt // my available Platinum
       for (i <- 0 until zonecount) {
         // zid: this zone's ID
         // ownerid: the player who owns this zone (-1 otherwise)
@@ -349,12 +349,13 @@ object Player {
         // podsp1: player 1's PODs on this zone
         // podsp2: player 2's PODs on this zone (always 0 for a two player game)
         // podsp3: player 3's PODs on this zone (always 0 for a two or three player game)
-        val Array(zid, ownerid, podsp0, podsp1, podsp2, podsp3) = for (i <- scala.io.StdIn.readLine split " ") yield i.toInt
-        val pods = List(new Pod(0, podsp0), new Pod(1, podsp1), new Pod(2, podsp2), new Pod(3, podsp3))
+        val Array(zid, ownerid, podsp0, podsp1, visible, platinum) = for (i <- scala.io.StdIn.readLine split " ") yield i.toInt
+        val pods = List(new Pod(0, podsp0), new Pod(1, podsp1) )
           .filter(f => f.size > 0)
         val zone = board.zones.get(zid).get
         zone.occupants = pods
         zone.owner = ownerid
+        if(visible ==1 ) zone.platinumSource = platinum
         if (round1 && ownerid != -1) {
           zone.isHeadquarters = true
         }
@@ -367,7 +368,7 @@ object Player {
       val moveTime = System.currentTimeMillis() - startTime
       Console.err.println(s"Time after calculating moves: $moveTime")
 
-      (new DefaultBuyStrategy).printBuys(board, myid, platinum)
+      (new DefaultBuyStrategy).printBuys(board, myid, availablePlatinum)
       round1 = false
     }
   }
