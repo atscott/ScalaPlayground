@@ -19,7 +19,7 @@ object Player {
 
   class BuyCommand(val zone: Zone, val numToBuy: Int)
 
-  class Zone(val id: Int, var platinumSource: Int, var owner: Int, var occupants: List[Pod], var isHeadquarters: Boolean = false)
+  class Zone(val id: Int, var platinumSource: Int, var owner: Int, var occupants: List[Pod], var isHeadquarters: Boolean = false, var turnLastSeen: Int = 0)
 
   class Move(val origin: Int, val destination: Int) {
     override def toString: String = "zone " + origin + " -> zone " + destination
@@ -44,6 +44,19 @@ object Player {
         .foldRight(0) { case (pod, max) => math.max(pod.size, max)}
     }
 
+    def zoneHasAdjacentNotOwnedByPlayer(zoneId: Int, playerId: Int): Boolean =
+      zoneAdjacentOwnersCheck(ownerId => ownerId != playerId)(zoneId, playerId)
+
+    def zoneHasAdjacentOwnedByDifferentPlayer(zoneId: Int, playerId: Int): Boolean =
+      zoneAdjacentOwnersCheck(ownerId => ownerId != playerId && ownerId != -1)(zoneId, playerId)
+
+    private
+    def zoneAdjacentOwnersCheck(p: Int => Boolean)(zoneId: Int, playerId: Int): Boolean = {
+      adjacencyList.get(zoneId).get
+        .map(zoneId => zones.get(zoneId).get.owner)
+        .exists(p)
+    }
+
     def numberOfEnemyPodsInPositionToTakeZone(zoneId: Int, playerId: Int): Int =
       (for {
         zone <- adjacentZones(zoneId)
@@ -59,19 +72,6 @@ object Player {
         id <- adjacencyList.get(zoneId).get
         zone <- zones.get(id)
       } yield zone
-
-    def zoneHasAdjacentNotOwnedByPlayer(zoneId: Int, playerId: Int): Boolean =
-      zoneAdjacentOwnersCheck(ownerId => ownerId != playerId)(zoneId, playerId)
-
-    def zoneHasAdjacentOwnedByDifferentPlayer(zoneId: Int, playerId: Int): Boolean =
-      zoneAdjacentOwnersCheck(ownerId => ownerId != playerId && ownerId != -1)(zoneId, playerId)
-
-    private
-    def zoneAdjacentOwnersCheck(p: Int => Boolean)(zoneId: Int, playerId: Int): Boolean = {
-      adjacencyList.get(zoneId).get
-        .map(zoneId => zones.get(zoneId).get.owner)
-        .exists(p)
-    }
 
     def from(startZone: Zone): Stream[Path] = {
       def iter(initial: Stream[Path], visitQueue: List[Path], explored: Set[Zone]): Stream[Path] = {
@@ -132,7 +132,7 @@ object Player {
 
 
   trait MoveStrategy {
-    def printMoves(maxComputeTime: Duration) = print("WAIT")
+    def printMoves(maxComputeTime: Duration) = println("WAIT")
   }
 
   class DefaultMoveStrategy extends MoveStrategy
@@ -185,12 +185,12 @@ object Player {
             val moves = board.from(startZone).toIterator
             val movesWithinX = moves.takeWhile { case path => path.moves.size < 30}
               .toList
-            val sorted = movesWithinX.sortWith { case (pathA, pathB) =>
-              pathA.moves.size - pathA.destination.platinumSource < pathB.moves.size - pathB.destination.platinumSource
-            }
-            pathCache = pathCache.updated(startZone, sorted.toList)
+            pathCache = pathCache.updated(startZone, movesWithinX.toList)
+
           }
           zonesWithPathsBeingComputed = zonesWithPathsBeingComputed.filter(z => z.id != startZone.id)
+
+
           p complete Try(prioritizePaths(pathCache.get(startZone).get))
         }
       }
@@ -207,7 +207,7 @@ object Player {
         paths.nonEmpty && zone.platinumSource > 0 && onlyOnePod && adjacentEnemies == 1
       }
 
-      lazy val shouldRetreat : Boolean ={
+      lazy val shouldRetreat: Boolean = {
         val zone = paths.head.origin
         lazy val platinum = zone.platinumSource
         lazy val myPodSize = board.getPlayerPodSizeForZone(zone.id, player)
@@ -323,7 +323,7 @@ object Player {
       // zoneid: this zone's ID (between 0 and zoneCount-1)
       // platinumsource: the amount of Platinum this zone can provide per game turn
       val Array(zoneid, platinumsource) = for (i <- scala.io.StdIn.readLine split " ") yield i.toInt
-      new Zone(zoneid, 6, -1, List())
+      new Zone(zoneid, 1, -1, List())
     }
     val zoneMap = HashMap(zones.map(m => (m.id, m)): _*)
     val adjacentTouples = for (i <- 0 until linkcount) yield {
@@ -338,7 +338,7 @@ object Player {
     val board = new Board(zoneMap, adjacencyList)
     val bfsMoveStrategy = new BFSMoveStrategy(board, myid)
     // game loop
-    var round1 = true
+    var currentTurn = 0
     while (true) {
       val startTime = System.currentTimeMillis()
       val availablePlatinum = readInt // my available Platinum
@@ -350,13 +350,19 @@ object Player {
         // podsp2: player 2's PODs on this zone (always 0 for a two player game)
         // podsp3: player 3's PODs on this zone (always 0 for a two or three player game)
         val Array(zid, ownerid, podsp0, podsp1, visible, platinum) = for (i <- scala.io.StdIn.readLine split " ") yield i.toInt
-        val pods = List(new Pod(0, podsp0), new Pod(1, podsp1) )
-          .filter(f => f.size > 0)
+        val pods = List(new Pod(0, podsp0), new Pod(1, podsp1)).filter(f => f.size > 0)
         val zone = board.zones.get(zid).get
         zone.occupants = pods
-        zone.owner = ownerid
-        if(visible ==1 ) zone.platinumSource = platinum
-        if (round1 && ownerid != -1) {
+        if (visible == 1) {
+          zone.turnLastSeen = currentTurn
+          zone.platinumSource = platinum
+          zone.owner = ownerid
+        }
+        if (currentTurn - zone.turnLastSeen > 20) {
+          zone.owner = -1
+        }
+
+        if (currentTurn == 0 && ownerid != -1) {
           zone.isHeadquarters = true
         }
       }
@@ -369,7 +375,7 @@ object Player {
       Console.err.println(s"Time after calculating moves: $moveTime")
 
       (new DefaultBuyStrategy).printBuys(board, myid, availablePlatinum)
-      round1 = false
+      currentTurn = currentTurn + 1
     }
   }
 }
