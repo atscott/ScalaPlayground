@@ -146,17 +146,25 @@ class TheGreatEscapeTests extends FunSuite {
     assert(intersect)
   }
 
-
-  test("within bounds vertical"){
-    val board = Board(List(PlayerClass(Position(0, 0), 0, 0)), 4, 4, List())
-    val wallDeterminer = new WallDeterminer(board)
-    assert(!wallDeterminer.wallIsWithinBounds(Wall(3,3,'V'), board))
+  test("intersection 7") {
+    val wallDeterminer = new WallDeterminer(Board(List(), 0, 0, List()))
+    val wall1 = Wall(7, 7, 'H')
+    val wall2 = Wall(5, 7, 'H')
+    assert(!wallDeterminer.fullyIntersect(wall2.p1, wall2.p2, wall1.p1, wall1.p2))
+    assert(!wallDeterminer.fullyIntersect(wall1.p1, wall1.p2, wall2.p1, wall2.p2))
   }
 
-  test("within bounds horizontal"){
+
+  test("within bounds vertical") {
     val board = Board(List(PlayerClass(Position(0, 0), 0, 0)), 4, 4, List())
     val wallDeterminer = new WallDeterminer(board)
-    assert(!wallDeterminer.wallIsWithinBounds(Wall(3,3,'H'), board))
+    assert(!wallDeterminer.wallIsWithinBounds(Wall(3, 3, 'V'), board))
+  }
+
+  test("within bounds horizontal") {
+    val board = Board(List(PlayerClass(Position(0, 0), 0, 0)), 4, 4, List())
+    val wallDeterminer = new WallDeterminer(board)
+    assert(!wallDeterminer.wallIsWithinBounds(Wall(3, 3, 'H'), board))
   }
 
   test("getWallToBlock 1 ") {
@@ -177,7 +185,6 @@ class TheGreatEscapeTests extends FunSuite {
     assert(wall.isDefined)
     assert(wallDeterminer.wallIsWithinBounds(wall.get, board))
   }
-
 
 
 }

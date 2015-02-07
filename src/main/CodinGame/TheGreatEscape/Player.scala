@@ -46,17 +46,19 @@ object Player {
         val wallDir = if (moveDir == 'U' || moveDir == 'D') 'H' else 'V'
 
         val wall = Wall(wallX, wallY, wallDir)
+
         val valid = wallIsValid(wall, board)
         lazy val redirectionCost = callRedirectionPathDifference(wall, board, theirShortestPath.size, player)
-        if (valid && redirectionCost > 1)
+        if (valid && (redirectionCost > 1 || theirShortestPath.size < 3))
           Some((wall, redirectionCost))
         else
           None
       }
-      wallCandidates
+      val filtered = wallCandidates
         .flatten
         .toList
         .sortBy { case (wall, cost) => -1 * cost}
+      filtered
         .headOption
         .map { case (wall, cost) => wall}
     }
@@ -71,12 +73,18 @@ object Player {
     def wallIsValid(w: Wall, b: Board) =
       !board.walls.exists(boardWall => {fullyIntersect(boardWall.p1, boardWall.p2, w.p1, w.p2)}) && wallIsWithinBounds(w, b)
 
+
     def wallIsWithinBounds(w: Wall, b: Board) =
       w.p1.x >= 0 && w.p2.x >= 0 && w.p1.x <= b.width && w.p2.x <= b.width &&
         w.p1.y >= 0 && w.p2.y >= 0 && w.p1.y <= b.height && w.p2.y <= b.height
 
     def fullyIntersect(p1: Position, q1: Position, p2: Position, q2: Position): Boolean = {
-      def parallel(p1: Position, q1: Position, p2: Position, q2: Position): Boolean = {
+      def inLine(A: Position, B: Position, C: Position) =
+        if (A.x == C.x) B.x == C.x
+        else if (A.y == C.y) B.y == C.y
+        else (A.x - C.x) * (A.y - C.y) == (C.x - B.x) * (C.y - B.y)
+
+      lazy val parallel = {
         val slope1 = Try((p1.y - q1.y) / (p1.x - q1.x))
         val slope2 = Try((p2.y - q2.y) / (p2.x - q2.x))
         (slope1, slope2) match {
@@ -85,18 +93,13 @@ object Player {
           case _ => false
         }
       }
-      def inLine(A: Position, B: Position, C: Position) =
-        if (A.x == C.x) B.x == C.x
-        else if (A.y == C.y) B.y == C.y
-        else (A.x - C.x) * (A.y - C.y) == (C.x - B.x) * (C.y - B.y)
+
+      lazy val shareOnlyOnePoint = List(p1, q1, p2, q2).toSet.size == 3
 
       if (!doIntersect(p1, q1, p2, q2)) false
-      else {
-        if (parallel(p1, q1, p2, q2))
-          !((q1.x == p2.x && q1.y == p2.y) || (p1.x == q1.x && p1.y == q1.y))
-        else
-          !(inLine(p1, q1, p2) || inLine(p1, q1, q2))
-      }
+      else
+      if (parallel) !shareOnlyOnePoint
+      else !(inLine(p1, q1, p2) || inLine(p1, q1, q2))
     }
 
 
@@ -163,11 +166,14 @@ object Player {
         neighbor <- neighbors(pos)
         if !visited.contains(neighbor) && canTravel(pos, neighbor)
       } yield (neighbor, pos)).toList
-
       val newVisited = visited ++ (unvisitedNeighbors map { case (neighbor, predecessor) => neighbor})
       val newPredecessors = predecessors ++ Map(unvisitedNeighbors: _*)
       val newQueue = (unvisitedNeighbors map { case (neighbor, predecessor) => neighbor}).toSet
 
+      if (goals.contains(Position(1, 8)) && newQueue.toSet.isEmpty) {
+        Console.err.println(newPredecessors)
+        Console.err.println(visited)
+      }
       if ((newQueue intersect goals).nonEmpty) newPredecessors
       else BFS(goals, newQueue.toSet, newVisited, newPredecessors)
     }
@@ -183,17 +189,25 @@ object Player {
 
     def canTravel(from: Position, to: Position) = {
       if (sameColumn(from, to)) {
-        !board.walls.exists(wall => wallHorizontallyBlocks(Position(math.max(from.x, to.x), math.max(from.y, to.y)), wall))
+        !board.walls.exists(wall => wallHorizontallyBlocks(from, to, wall))
       } else {
-        !board.walls.exists(wall => wallVerticallyBlocks(Position(math.max(from.x, to.x), math.max(from.y, from.y)), wall))
+        !board.walls.exists(wall => wallVerticallyBlocks(from, to, wall))
       }
     }
 
     def sameColumn(p1: Position, p2: Position) = p1.x == p2.x
 
-    def wallVerticallyBlocks(p: Position, wall: Wall) = wall.orientation == 'V' && wall.wallX == p.x && wall.wallY <= p.y && wall.wallY + wall.size > p.y
+    def wallVerticallyBlocks(from: Position, to: Position, wall: Wall) =
+      wall.orientation == 'V' &&
+        wall.wallX == math.max(from.x, to.x) &&
+        wall.wallY <= from.y &&
+        wall.wallY + wall.size > from.y
 
-    def wallHorizontallyBlocks(p: Position, wall: Wall) = wall.orientation == 'H' && wall.wallY == p.y && wall.wallX <= p.x && wall.wallX + wall.size > p.x
+    def wallHorizontallyBlocks(from: Position, to: Position, wall: Wall) =
+      wall.orientation == 'H' &&
+        wall.wallY == math.max(from.y, to.y) &&
+        wall.wallX <= from.x &&
+        wall.wallX + wall.size > from.x
   }
 
 
