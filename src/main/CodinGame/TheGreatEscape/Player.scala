@@ -46,15 +46,19 @@ object Player {
         val wallDir = if (moveDir == 'U' || moveDir == 'D') 'H' else 'V'
 
         val wall = Wall(wallX, wallY, wallDir)
-        if (wallIsValid(wall, board) && wallCausesRedirectByMoreThan1(wall, board, theirShortestPath.size, player))
-          Some(wall)
+        val valid = wallIsValid(wall, board)
+        lazy val redirectionCost = callRedirectionPathDifference(wall, board, theirShortestPath.size, player)
+        if (valid && redirectionCost > 1)
+          Some((wall, redirectionCost))
         else
           None
       }
       wallCandidates
-        .dropWhile(w => !w.isDefined)
+        .flatten
+        .toList
+        .sortBy { case (wall, cost) => -1 * cost}
         .headOption
-        .map(wallOption => wallOption.get)
+        .map { case (wall, cost) => wall}
     }
 
     private def moveDirection(start: Position, finish: Position) =
@@ -124,11 +128,11 @@ object Player {
       else false
     }
 
-    def wallCausesRedirectByMoreThan1(w: Wall, b: Board, currentDistance: Int, player: PlayerClass): Boolean = {
+    def callRedirectionPathDifference(w: Wall, b: Board, currentDistance: Int, player: PlayerClass): Int = {
       val newBoard = Board(List(player), b.width, b.height, w :: b.walls)
       val pathDeterminer = new PathDeterminer(newBoard)
       val newPath = pathDeterminer.shortestPathToFinish(player.id)
-      newPath.size - currentDistance > 1
+      newPath.size - currentDistance
     }
 
   }
