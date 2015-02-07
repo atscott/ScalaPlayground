@@ -1,20 +1,104 @@
 package CodinGame.TheGreatEscape
 
+import scala.util.{Success, Failure, Try}
+
 /**
  * Auto-generated code below aims at helping you parse
  * the standard input according to the problem statement.
  **/
 object Player {
+  val defaultWallSize = 2
 
   case class Position(x: Int = -1, y: Int = -1)
 
   case class PlayerClass(var position: Position, var wallsLeft: Int, id: Int)
 
-  case class Board(players: List[PlayerClass], width: Int, height: Int, var walls: List[Wall]) {
+  case class Board(players: List[PlayerClass], width: Int, height: Int, var walls: List[Wall])
 
+  case class Wall(wallX: Int, wallY: Int, orientation: Char, size: Int = 2) {
+    val endX = if (orientation == 'V') wallX else wallX + size
+    val endY = if (orientation == 'H') wallY else wallY + size
+    val p1 = Position(wallX, wallY)
+    val p2 = Position(endX, endY)
   }
 
-  case class Wall(wallX: Int, wallY: Int, orientation: Char, size: Int = 2)
+  class WallDeterminer(board: Board) {
+    def getWalltoBlock(player: PlayerClass, theirShortestPath: List[Position]): Wall = {
+      val wallCandidates = for {
+        target <- theirShortestPath
+        offset <- 0 until defaultWallSize
+      } yield {
+        val wallDir =
+          if (player.position.x == theirShortestPath.head.x) 'H'
+          else 'V'
+
+        val wall = if (wallDir == 'V') Wall(target.x, target.y - offset, wallDir)
+        else Wall(target.x - offset, target.y, wallDir)
+        if (board.walls.exists(boardWall => {
+          fullyIntersect(boardWall.p1, boardWall.p2, wall.p1, wall.p2)
+        }))
+          None
+        else
+          Some(wall)
+      }
+      wallCandidates.dropWhile(w => !w.isDefined).head.get
+    }
+
+
+    def fullyIntersect(p1: Position, q1: Position, p2: Position, q2: Position): Boolean = {
+      def parallel(p1: Position, q1: Position, p2: Position, q2: Position): Boolean = {
+        val slope1 = Try((p1.y - q1.y) / (p1.x - q1.x))
+        val slope2 = Try((p2.y - q2.y) / (p2.x - q2.x))
+        (slope1, slope2) match {
+          case (Success(s1), Success(s2)) => s1 == s2
+          case (Failure(_), Failure(_)) => true
+          case _ => false
+        }
+      }
+      def inLine(A: Position, B: Position, C: Position) =
+        if (A.x == C.x) B.x == C.x
+        else if (A.y == C.y) B.y == C.y
+        else (A.x - C.x) * (A.y - C.y) == (C.x - B.x) * (C.y - B.y)
+
+      if (!doIntersect(p1, q1, p2, q2)) false
+      else {
+        if (parallel(p1, q1, p2, q2))
+          !((q1.x == p2.x && q1.y == p2.y) || (p1.x == q1.x && p1.y == q1.y))
+        else
+          !(inLine(p1, q1, p2) || inLine(p1, q1, q2))
+      }
+    }
+
+
+    def doIntersect(p1: Position, q1: Position, p2: Position, q2: Position): Boolean = {
+      def onSegment(p: Position, q: Position, r: Position): Boolean = {
+        if (q.x <= math.max(p.x, r.x) && q.x >= math.min(p.x, r.x) &&
+          q.y <= math.max(p.y, r.y) && q.y >= math.min(p.y, r.y))
+          true
+        else false
+      }
+
+      def orientation(p: Position, q: Position, r: Position): Int = {
+        val value = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y)
+        if (value == 0) 0
+        else if (value > 0) 1
+        else 2
+      }
+
+      val o1 = orientation(p1, q1, p2)
+      val o2 = orientation(p1, q1, q2)
+      val o3 = orientation(p2, q2, p1)
+      val o4 = orientation(p2, q2, q1)
+
+      if (o1 != o2 && o3 != o4) true
+      else if (o1 == 0 && onSegment(p1, p2, q1)) true
+      else if (o2 == 0 && onSegment(p1, q2, q1)) true
+      else if (o3 == 0 && onSegment(p2, p1, q2)) true
+      else if (o4 == 0 && onSegment(p2, q1, q2)) true
+      else false
+    }
+
+  }
 
   class PathDeterminer(board: Board) {
 
@@ -84,6 +168,7 @@ object Player {
     val board = Board(players, w, h, List())
     val me = players.find(f => f.id == myid).get
     val pathDeterminer = new PathDeterminer(board)
+    val wallDeterminer = new WallDeterminer(board)
     // game loop
     while (true) {
       for (i <- 0 until playercount) {
@@ -103,13 +188,32 @@ object Player {
       // Write an action using println
       // To debug: Console.err.println("Debug messages...")
       val target = pathDeterminer.shortestPathToFinish(myid).head
-      Console.err.println("target: " + target)
-      Console.err.println("position: " + me.position)
-      if (target.x == me.position.x)
-        if (target.y > me.position.y) println("DOWN")
-        else println("UP")
-      else if (target.x > me.position.x) println("RIGHT")
-      else println("LEFT")
+      val paths = (for {
+        playerId <- 0 until playercount
+        player <- board.players.filter(f => f.id == playerId && f.wallsLeft != -1)
+      } yield (player, pathDeterminer.shortestPathToFinish(player.id))).toList
+      val closestToWinning = paths.groupBy { case (playerId, path) => path.size}.minBy(m => m._1)._2
+
+      closestToWinning.find { case (player, path) => player.id == myid} match {
+        case Some((_, path)) =>
+          printMove(path.head)
+        case _ =>
+          if (board.players.find(f => f.id == myid).get.wallsLeft > 0) {
+            val wall = wallDeterminer.getWalltoBlock(closestToWinning.head._1, closestToWinning.head._2)
+            println(wall.wallX + " " + wall.wallY + " " + wall.orientation + " I'M GONNA LOSE")
+          } else {
+            printMove(paths.find { case (player, path) => player.id == myid}.get._2.head, "I'M GONNA LOSE")
+          }
+      }
+
+      def printMove(target: Position, message: String = "I'M GONNA WIN!"): Unit = {
+        if (target.x == me.position.x)
+          if (target.y > me.position.y) println("DOWN " + message)
+          else println("UP " + message)
+        else if (target.x > me.position.x) println("RIGHT " + message)
+        else println("LEFT " + message)
+      }
+
     }
   }
 
