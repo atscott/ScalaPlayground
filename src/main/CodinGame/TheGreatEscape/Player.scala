@@ -135,7 +135,10 @@ object Player {
       val newBoard = Board(List(player), b.width, b.height, w :: b.walls)
       val pathDeterminer = new PathDeterminer(newBoard)
       val newPath = pathDeterminer.shortestPathToFinish(player.id)
-      newPath.size - currentDistance
+      newPath match {
+        case Some(p) => p.size - currentDistance
+        case None => -1
+      }
     }
 
   }
@@ -147,7 +150,7 @@ object Player {
       else getPathFromPredecessorMap(start, predecessors.get(end).get, predecessors) ++ List(end)
     }
 
-    def shortestPathToFinish(playerId: Int): List[Position] = {
+    def shortestPathToFinish(playerId: Int): Option[List[Position]] = {
       val targets = if (playerId == 0) for (y <- 0 until board.height) yield Position(board.width - 1, y)
       else if (playerId == 1) for (y <- 0 until board.height) yield Position(0, y)
       else if (playerId == 2) for (x <- 0 until board.width) yield Position(x, board.height - 1)
@@ -155,7 +158,10 @@ object Player {
 
       val start = board.players.filter(f => f.id == playerId).head.position
       val predecessors = BFS(targets.toSet, Set(start), Set(start), Map())
-      getPathFromPredecessorMap(start, predecessors.find(p => targets.contains(p._1)).get._1, predecessors)
+      predecessors.find { case (pos, _) => targets.contains(pos)} match {
+        case Some((pos, _)) => Some(getPathFromPredecessorMap(start, pos, predecessors))
+        case _ => None
+      }
     }
 
     def BFS(goals: Set[Position], queue: Set[Position], visited: Set[Position], predecessors: Map[Position, Position]): Map[Position, Position] = {
@@ -239,7 +245,12 @@ object Player {
       val paths = (for {
         playerId <- 0 until playercount
         player <- board.players.filter(f => f.id == playerId && f.wallsLeft != -1)
-      } yield (player, pathDeterminer.shortestPathToFinish(player.id))).toList
+      } yield {
+        pathDeterminer.shortestPathToFinish(player.id) match{
+          case Some(path) => Some((player, path))
+          case _ => None
+        }
+      }).flatten.toList
       val closestToWinning = paths.groupBy { case (playerId, path) => path.size}.minBy(m => m._1)._2
 
       closestToWinning.find { case (player, path) => player.id == myid} match {
