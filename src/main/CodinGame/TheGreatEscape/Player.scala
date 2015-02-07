@@ -23,27 +23,53 @@ object Player {
   }
 
   class WallDeterminer(board: Board) {
-    def getWalltoBlock(player: PlayerClass, theirShortestPath: List[Position]): Wall = {
+    def getWalltoBlock(player: PlayerClass, theirShortestPath: List[Position]): Option[Wall] = {
       val wallCandidates = for {
-        target <- theirShortestPath
+        i <- 0 until theirShortestPath.size
         offset <- 0 until defaultWallSize
       } yield {
-        val wallDir =
-          if (player.position.x == theirShortestPath.head.x) 'H'
-          else 'V'
+        val target = theirShortestPath(i)
+        val previous = if (i == 0) player.position else theirShortestPath(i - 1)
+        val moveDir = moveDirection(previous, target)
 
-        val wall = if (wallDir == 'V') Wall(target.x, target.y - offset, wallDir)
-        else Wall(target.x - offset, target.y, wallDir)
-        if (board.walls.exists(boardWall => {
-          fullyIntersect(boardWall.p1, boardWall.p2, wall.p1, wall.p2)
-        }))
-          None
-        else
+
+        val wallX =
+          if (moveDir == 'L') previous.x
+          else if (moveDir == 'R') target.x
+          else target.x - offset
+
+        val wallY =
+          if (moveDir == 'U') previous.y
+          else if (moveDir == 'D') target.y
+          else target.y - offset
+
+        val wallDir = if (moveDir == 'U' || moveDir == 'D') 'H' else 'V'
+
+        val wall = Wall(wallX, wallY, wallDir)
+        if (wallIsValid(wall, board) && wallCausesRedirectByMoreThan1(wall, board, theirShortestPath.size, player))
           Some(wall)
+        else
+          None
       }
-      wallCandidates.dropWhile(w => !w.isDefined).head.get
+      wallCandidates
+        .dropWhile(w => !w.isDefined)
+        .headOption
+        .map(wallOption => wallOption.get)
     }
 
+    private def moveDirection(start: Position, finish: Position) =
+      if (start.x != finish.x)
+        if (start.x > finish.x) 'L'
+        else 'R'
+      else if (start.y > finish.y) 'U'
+      else 'D'
+
+    def wallIsValid(w: Wall, b: Board) =
+      !board.walls.exists(boardWall => {fullyIntersect(boardWall.p1, boardWall.p2, w.p1, w.p2)}) && wallIsWithinBounds(w, b)
+
+    def wallIsWithinBounds(w: Wall, b: Board) =
+      w.p1.x >= 0 && w.p2.x >= 0 && w.p1.x <= b.width && w.p2.x <= b.width &&
+        w.p1.y >= 0 && w.p2.y >= 0 && w.p1.y <= b.height && w.p2.y <= b.height
 
     def fullyIntersect(p1: Position, q1: Position, p2: Position, q2: Position): Boolean = {
       def parallel(p1: Position, q1: Position, p2: Position, q2: Position): Boolean = {
@@ -96,6 +122,13 @@ object Player {
       else if (o3 == 0 && onSegment(p2, p1, q2)) true
       else if (o4 == 0 && onSegment(p2, q1, q2)) true
       else false
+    }
+
+    def wallCausesRedirectByMoreThan1(w: Wall, b: Board, currentDistance: Int, player: PlayerClass): Boolean = {
+      val newBoard = Board(List(player), b.width, b.height, w :: b.walls)
+      val pathDeterminer = new PathDeterminer(newBoard)
+      val newPath = pathDeterminer.shortestPathToFinish(player.id)
+      newPath.size - currentDistance > 1
     }
 
   }
@@ -185,9 +218,6 @@ object Player {
         Wall(wallx, wally, wallorientation.charAt(0))
       }).toList
 
-      // Write an action using println
-      // To debug: Console.err.println("Debug messages...")
-      val target = pathDeterminer.shortestPathToFinish(myid).head
       val paths = (for {
         playerId <- 0 until playercount
         player <- board.players.filter(f => f.id == playerId && f.wallsLeft != -1)
@@ -199,8 +229,11 @@ object Player {
           printMove(path.head)
         case _ =>
           if (board.players.find(f => f.id == myid).get.wallsLeft > 0) {
-            val wall = wallDeterminer.getWalltoBlock(closestToWinning.head._1, closestToWinning.head._2)
-            println(wall.wallX + " " + wall.wallY + " " + wall.orientation + " I'M GONNA LOSE")
+            val wallOption = wallDeterminer.getWalltoBlock(closestToWinning.head._1, closestToWinning.head._2)
+            wallOption match {
+              case Some(wall) => println(wall.wallX + " " + wall.wallY + " " + wall.orientation + " I'M GONNA LOSE")
+              case _ => printMove(paths.find { case (player, path) => player.id == myid}.get._2.head, "I'M GONNA LOSE")
+            }
           } else {
             printMove(paths.find { case (player, path) => player.id == myid}.get._2.head, "I'M GONNA LOSE")
           }

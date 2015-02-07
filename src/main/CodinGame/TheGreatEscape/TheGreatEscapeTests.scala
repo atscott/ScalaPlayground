@@ -147,20 +147,37 @@ class TheGreatEscapeTests extends FunSuite {
   }
 
 
+  test("within bounds vertical"){
+    val board = Board(List(PlayerClass(Position(0, 0), 0, 0)), 4, 4, List())
+    val wallDeterminer = new WallDeterminer(board)
+    assert(!wallDeterminer.wallIsWithinBounds(Wall(3,3,'V'), board))
+  }
+
+  test("within bounds horizontal"){
+    val board = Board(List(PlayerClass(Position(0, 0), 0, 0)), 4, 4, List())
+    val wallDeterminer = new WallDeterminer(board)
+    assert(!wallDeterminer.wallIsWithinBounds(Wall(3,3,'H'), board))
+  }
+
   test("getWallToBlock 1 ") {
     val board = Board(List(PlayerClass(Position(0, 0), 0, 0)), 4, 4, List())
     val wallDeterminer = new WallDeterminer(board)
     val paths = List(Position(1, 0), Position(2, 0), Position(3, 0))
     val wall = wallDeterminer.getWalltoBlock(board.players.head, paths)
-    assert(wall == Wall(1,0,'V'))
+    assert(wallDeterminer.wallIsWithinBounds(wall.get, board))
+    assert(wall.get == Wall(1, 0, 'V'))
   }
 
   test("getWallToBlock 2") {
-    val board = Board(List(PlayerClass(Position(0, 0), 0, 0)), 4, 4, List(Wall(1, 0, 'V')))
+    //starting at bottom right corner, player with id 1 goes left
+    val board = Board(List(PlayerClass(Position(3, 3), 0, 1)), 4, 4, List())
     val wallDeterminer = new WallDeterminer(board)
-    val paths = List(Position(1, 0), Position(2, 0), Position(3, 0))
+    val paths = List(Position(2, 3), Position(1, 3), Position(0, 3))
     val wall = wallDeterminer.getWalltoBlock(board.players.head, paths)
-    assert(wall != Wall(1,0,'V'))
+    assert(wall.isDefined)
+    assert(wallDeterminer.wallIsWithinBounds(wall.get, board))
   }
+
+
 
 }
