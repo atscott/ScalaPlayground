@@ -49,7 +49,7 @@ object Player {
 
         val valid = wallIsValid(wall, board)
         lazy val redirectionCost = callRedirectionPathDifference(wall, board, theirShortestPath.size, player)
-        if (valid && (redirectionCost > 1 || theirShortestPath.size < 3))
+        if (valid && (redirectionCost > 1 || theirShortestPath.size < 2))
           Some((wall, redirectionCost))
         else
           None
@@ -176,10 +176,6 @@ object Player {
       val newPredecessors = predecessors ++ Map(unvisitedNeighbors: _*)
       val newQueue = (unvisitedNeighbors map { case (neighbor, predecessor) => neighbor}).toSet
 
-      if (goals.contains(Position(1, 8)) && newQueue.toSet.isEmpty) {
-        Console.err.println(newPredecessors)
-        Console.err.println(visited)
-      }
       if ((newQueue intersect goals).nonEmpty) newPredecessors
       else BFS(goals, newQueue.toSet, newVisited, newPredecessors)
     }
@@ -266,6 +262,7 @@ object Player {
           } else {
             printMove(paths.find { case (player, path) => player.id == myid}.get._2.head, "I'M GONNA LOSE")
           }
+
       }
 
       def printMove(target: Position, message: String = "I'M GONNA WIN!"): Unit = {
