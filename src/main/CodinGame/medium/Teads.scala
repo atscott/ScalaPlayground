@@ -1,15 +1,11 @@
 import scala.collection.mutable
 
-/**
- * Auto-generated code below aims at helping you parse
- * the standard input according to the problem statement.
- **/
 object Solution {
 
   case class CacheKey(start: Int, parent: Option[Int])
 
   def main(args: Array[String]) {
-    val n = scala.io.StdIn.readInt() // the number of adjacency relations
+    val n = scala.io.StdIn.readInt()
     var adjacencyList = mutable.Map[Int, List[Int]]()
     for (i <- 0 until n) {
       val Array(xi, yi) = for (i <- scala.io.StdIn.readLine split " ") yield i.toInt
@@ -23,10 +19,7 @@ object Solution {
       if (depthCache.contains(cacheKey)) {
         depthCache(cacheKey)
       } else {
-        val neighbors = parent match {
-          case Some(v) => adjacencyList(start) filter { f => f != v}
-          case _ => adjacencyList(start)
-        }
+        val neighbors = adjacencyList(start) filter { f => Some(f) != parent}
         val myDepth =
           if (neighbors.isEmpty) 0
           else 1 + (neighbors map { n => depth(n, Some(start))}).max
