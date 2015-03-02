@@ -8,8 +8,7 @@ def Roman(n: Int): String =
     9 -> "IX",
     5 -> "V", 
     4 -> "IV",
-    1 -> "I")
-  .foldRight("I" * n)((kv, acc) => acc.replace("I" * kv._1, kv._2))
+    1 -> "I").foldRight("I" * n)((kv, acc) => acc.replace("I" * kv._1, kv._2))
 
 Roman(5)
 Roman(4)
